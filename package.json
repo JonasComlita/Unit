@@ -1,0 +1,49 @@
+{
+  "name": "unit-strategy-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A 3D strategy game inspired by chess, go, and physics",
+  "author": "Your Name",
+  "license": "MIT",
+  "homepage": "https://your-domain.com",
+  "dependencies": {
+    "@babylonjs/core": "latest",
+    "@babylonjs/gui": "latest",
+    "@capacitor/cli": "latest",
+    "@capacitor/core": "latest",
+    "msgpack-lite": "latest",
+    "react": "latest",
+    "react-babylonjs": "latest",
+    "react-dom": "latest",
+    "typescript": "latest"
+  },
+  "devDependencies": {
+    "@types/msgpack-lite": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}
