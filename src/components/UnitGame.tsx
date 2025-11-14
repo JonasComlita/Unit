@@ -1,16 +1,190 @@
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+// src/components/UnitGame.tsx
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Engine, Scene, useScene } from 'react-babylonjs';
-import { Vector3, Color3, Quaternion, PointerInfo, PointerEventTypes, Mesh, Animation, CubicEase, EasingFunction } from '@babylonjs/core';
+import { Vector3, Color3 } from '@babylonjs/core';
 import { useGame, ActionPhase } from '../hooks/useGame';
 import GameBoard from './GameBoard';
 import MobileCameraController from './MobileCameraController';
 import MobileHUD from './MobileHUD';
+import { VisualEffectsManager } from '../game/visualEffects';
+import { Vertex } from '../game/types';
 
 
-// Main Game Component
 const UnitGame: React.FC = () => {
-  const { gameState, handleAction } = useGame();
-  const [activePhase, setActivePhase] = useState<ActionPhase>(null);
+  const scene = useScene();
+  const vfxRef = useRef<VisualEffectsManager | null>(null);
+
+  // Initialize visual effects when scene is ready
+  useEffect(() => {
+    if (!scene || vfxRef.current) return;
+
+    // Create visual effects manager
+    vfxRef.current = new VisualEffectsManager(scene, {
+      enableParticles: true,
+      enableGlow: true,
+      enableAnimations: true,
+      enableShadows: !isMobile(), // Desktop only
+      enablePostProcessing: !isMobile(), // Desktop only
+      quality: isMobile() ? 'medium' : 'high'
+    });
+
+    console.log('✨ Visual effects initialized');
+
+    // Cleanup on unmount
+    return () => {
+      if (vfxRef.current) {
+        vfxRef.current.dispose();
+        vfxRef.current = null;
+      }
+    };
+  }, [scene]);
+
+  // const vfx = vfxRef.current; // Not used yet
+
+  // ...existing code...
+  const { gameState, handleAction: baseHandleAction } = useGame();
+  const [activePhase, setActivePhase] = useState<ActionPhase | null>(null);
+
+  // Enhanced handleAction with VFX
+  const vfx = vfxRef.current;
+
+  // Remove unused placePiece and movePiece functions
+
+  // Pulse animation for selected pieces
+  useEffect(() => {
+    const selectedVertexId = gameState.selectedVertexId;
+    if (selectedVertexId && vfx && scene) {
+      const mesh = scene.getMeshByName(`piece-${selectedVertexId}`);
+      if (mesh) {
+        vfx.animatePulse(mesh, 2000);
+      }
+    }
+  }, [gameState.selectedVertexId, vfx, scene]);
+  const handleAction = useCallback((action: any) => {
+    baseHandleAction(action);
+    // Add visual effects based on action type
+    if (vfx) {
+      switch (action.type) {
+        case 'place': {
+          const placeVertex = gameState.vertices[action.vertexId];
+          if (placeVertex) vfx.createPlacementParticles(placeVertex.position);
+          break;
+        }
+        case 'infuse': {
+          const infuseVertex = gameState.vertices[action.vertexId];
+          if (infuseVertex) vfx.createInfusionParticles(infuseVertex.position);
+          break;
+        }
+        case 'attack': {
+          const targetVertex = gameState.vertices[action.targetId];
+          if (targetVertex) {
+            // Get attacker and defender colors
+            const attackerVertex = gameState.vertices[action.vertexId];
+            const attackerColor = attackerVertex && attackerVertex.stack.length > 0 && attackerVertex.stack[0].player === 'Player1'
+              ? new Color3(0.29, 0.56, 0.89)
+              : new Color3(0.82, 0.13, 0.11);
+            const defenderColor = targetVertex && targetVertex.stack.length > 0 && targetVertex.stack[0].player === 'Player1'
+              ? new Color3(0.29, 0.56, 0.89)
+              : new Color3(0.82, 0.13, 0.11);
+            vfx.createAttackParticles(targetVertex.position, attackerColor, defenderColor);
+            vfx.animateCameraShake(0.1, 300);
+          }
+          break;
+        }
+        case 'move': {
+          // Animation handled in next step
+          break;
+        }
+        default:
+          break;
+      }
+    }
+  }, [vfx, gameState, baseHandleAction]);
+  // Victory celebration effect
+  useEffect(() => {
+    if (gameState.winner && vfx) {
+      // Get winner's pieces positions
+      const winnerPieces = Object.values(gameState.vertices as Record<string, Vertex>)
+        .filter((v: Vertex) => v.stack.length > 0 && v.stack[0].player === gameState.winner)
+        .map((v: Vertex) => v.position);
+
+      // Create victory particles at each piece
+      winnerPieces.forEach(pos => {
+        setTimeout(() => {
+          // Ensure pos is a Vector3
+          vfx.createVictoryParticles(
+            pos && typeof pos.add === 'function' ? pos : new Vector3(pos.x, pos.y, pos.z)
+          );
+        }, Math.random() * 1000);
+      });
+
+      // Camera celebration shake
+      setTimeout(() => {
+        vfx.animateCameraShake(0.05, 500);
+      }, 500);
+    }
+  }, [gameState.winner, gameState.vertices, vfx]);
+  // Register piece meshes as shadow casters and ground as shadow receiver
+  useEffect(() => {
+    // Use scene from hook scope
+    const currentScene = scene;
+    if (!vfx || !currentScene) return;
+
+    Object.values(gameState.vertices as Record<string, Vertex>).forEach((vertex: Vertex) => {
+      if (vertex.stack.length > 0) {
+        const mesh = currentScene.getMeshByName(`piece-${vertex.id}`);
+        if (mesh) {
+          vfx.addShadowCaster(mesh);
+        }
+      }
+    });
+
+    // Ground receives shadows
+    const ground = currentScene.getMeshByName('ground');
+    if (ground) {
+      vfx.enableShadowReceiver(ground);
+    }
+  }, [gameState.vertices, vfx, scene]);
+  // Victory celebration effect
+  useEffect(() => {
+    if (gameState.winner && vfx) {
+      // Get winner's pieces positions
+      const winnerPieces = Object.values(gameState.vertices as Record<string, Vertex>)
+        .filter((v: Vertex) => v.stack.length > 0 && v.stack[0].player === gameState.winner)
+        .map((v: Vertex) => v.position);
+
+      // Create victory particles at each piece
+      winnerPieces.forEach(pos => {
+        setTimeout(() => {
+          vfx.createVictoryParticles(pos);
+        }, Math.random() * 1000);
+      });
+
+      // Camera celebration shake
+      setTimeout(() => {
+        vfx.animateCameraShake(0.05, 500);
+      }, 500);
+    }
+  }, [gameState.winner, gameState.vertices, vfx]);
+  // Register piece meshes as shadow casters and ground as shadow receiver
+  useEffect(() => {
+    if (!vfx || !scene) return;
+
+    Object.values(gameState.vertices as Record<string, Vertex>).forEach((vertex: Vertex) => {
+      if (vertex.stack.length > 0) {
+        const mesh = scene.getMeshByName(`piece-${vertex.id}`);
+        if (mesh) {
+          vfx.addShadowCaster(mesh);
+        }
+      }
+    });
+
+    // Ground receives shadows
+    const ground = scene.getMeshByName('ground');
+    if (ground) {
+      vfx.enableShadowReceiver(ground);
+    }
+  }, [gameState.vertices, vfx, scene]);
 
   const handlePhaseSelect = useCallback((phase: ActionPhase) => {
     if (phase === 'placement' && gameState.turn.hasPlaced) return;
@@ -60,6 +234,17 @@ const UnitGame: React.FC = () => {
     }
   }, [gameState, handleAction, activePhase]);
 
+  const [visualQuality, setVisualQuality] = useState<'low' | 'medium' | 'high'>(
+    isMobile() ? 'medium' : 'high'
+  );
+
+  const handleQualityChange = (quality: 'low' | 'medium' | 'high') => {
+    setVisualQuality(quality);
+    if (vfx) {
+      vfx.updateQuality(quality);
+    }
+  };
+
   return (
     <div style={{ 
         width: '100vw', 
@@ -71,6 +256,20 @@ const UnitGame: React.FC = () => {
         position: 'relative',
         fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     }}>
+      {/* Settings menu for visual quality */}
+      <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 10, background: '#222b', borderRadius: 8, padding: 8 }}>
+        <label htmlFor="visual-quality-select" style={{ color: '#fff', marginRight: 8 }}>Visual Quality:</label>
+        <select
+          id="visual-quality-select"
+          value={visualQuality}
+          onChange={e => handleQualityChange(e.target.value as 'low' | 'medium' | 'high')}
+          style={{ fontSize: 14, padding: 4, borderRadius: 4 }}
+        >
+          <option value="low">Low (Best Performance)</option>
+          <option value="medium">Medium (Balanced)</option>
+          <option value="high">High (Best Quality)</option>
+        </select>
+      </div>
       <MobileHUD 
         gameState={gameState} 
         onEndTurn={() => {
@@ -103,5 +302,11 @@ const UnitGame: React.FC = () => {
     </div>
   );
 };
+
+function isMobile() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+}
 
 export default UnitGame;

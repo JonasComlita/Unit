@@ -1,5 +1,5 @@
 // src/hooks/useGame.ts
-import { useState, useCallback, useEffect, } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useScene } from 'react-babylonjs';
 
 // Mobile Camera Controller Component
@@ -96,7 +96,3 @@ const MobileCameraController: React.FC = () => {
 };
 
 export default MobileCameraController;
-
-function useRef<T>(arg0: number) {
-    throw new Error('Function not implemented.');
-}

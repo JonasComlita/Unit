@@ -14,7 +14,6 @@ import {
     Animation,
     CubicEase,
     EasingFunction,
-    Mesh,
     AbstractMesh,
     DirectionalLight,
     ShadowGenerator,

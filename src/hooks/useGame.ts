@@ -1,7 +1,6 @@
-export type ActionPhase = 'placement' | 'infusion' | 'movement';
 // src/hooks/useGame.ts
 import { useState, useCallback, useEffect } from 'react';
-import { GameState, PlayerAction, Piece, PlayerId } from '../game/types';
+import { GameState, PlayerAction, Piece } from '../game/types';
 import { 
     initializeGameState, 
     calculateValidActions, 
@@ -11,6 +10,7 @@ import {
 import { gameLogger } from '../services/gameLogger';
 import { Capacitor } from '@capacitor/core';
 import { GAME_RULES } from '../game/constants';
+export type ActionPhase = 'placement' | 'infusion' | 'movement';
 
 export const useGame = () => {
     const [gameState, setGameState] = useState<GameState>(() => {

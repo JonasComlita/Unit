@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useScene } from 'react-babylonjs';
 import { Vector3, Quaternion, Color3, Mesh, PointerInfo, PointerEventTypes } from '@babylonjs/core';
-import { GameState, Piece, PlayerId, Vertex } from '../game/types';
+import { GameState, Piece, Vertex } from '../game/types';
 import { getForce } from '../game/gameLogic';
 import { ActionPhase } from '../hooks/useGame';
 
@@ -63,7 +63,6 @@ const GameBoard: React.FC<{ gameState: GameState; onVertexClick: (id: string) =>
             let shouldPulse = false;
 
             if (activePhase === 'placement' && isPlacementTarget) {
-                emissiveColor = new Color3(0.31, 0.78, 0.47);
                 shouldPulse = true;
             } else if (activePhase === 'infusion' && isInfusionTarget) {
                 emissiveColor = new Color3(1, 0.75, 0);
@@ -115,7 +114,7 @@ const GameBoard: React.FC<{ gameState: GameState; onVertexClick: (id: string) =>
                         <torus name={`indicator-${vertex.id}`} diameter={tapTargetDiameter * 1.2} thickness={0.08} tessellation={32} position={pos}>
                             <standardMaterial name={`mat-indicator-${vertex.id}`} 
                                 emissiveColor={finalEmissive}
-                                alpha={0.8} />
+                            />
                         </torus>
                     )}
 

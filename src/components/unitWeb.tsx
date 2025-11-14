@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Engine, Scene, useScene } from 'react-babylonjs';
 import { Vector3, Color3, Quaternion, PointerInfo, PointerEventTypes, Mesh } from '@babylonjs/core';
 import './unit.css';
-import { GameState, PlayerId, Vertex, Piece, PlayerState, TurnState } from '../game/types';
+import { GameState, PlayerId, Vertex, Piece } from '../game/types';
 
 // Action types for user interaction
 type PlayerAction = 
@@ -566,3 +566,5 @@ const UnitGame: React.FC = () => {
     </div>
   );
 };
+
+export default UnitGame;

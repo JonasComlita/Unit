@@ -1,6 +1,6 @@
 // src/game/gameLogic.ts
 import { Vector3 } from '@babylonjs/core';
-import { GameState, Vertex, PlayerId, Piece } from './types';
+import { GameState, Vertex, PlayerId } from './types';
 import { BOARD_CONFIG, GAME_RULES, getOccupationRequirement } from './constants';
 
 const { layout: boardLayoutRaw, layerSpacing, boardWidth, layerGravity } = BOARD_CONFIG;
