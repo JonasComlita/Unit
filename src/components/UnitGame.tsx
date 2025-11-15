@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Engine, Scene, useScene } from 'react-babylonjs';
 import { Vector3, Color3 } from '@babylonjs/core';
+import { MeshBuilder, StandardMaterial } from '@babylonjs/core';
 import { useGame, ActionPhase } from '../hooks/useGame';
 import GameBoard from './GameBoard';
 import MobileCameraController from './MobileCameraController';
@@ -39,16 +40,11 @@ const UnitGame: React.FC = () => {
     };
   }, [scene]);
 
-  // const vfx = vfxRef.current; // Not used yet
-
-  // ...existing code...
   const { gameState, handleAction: baseHandleAction } = useGame();
   const [activePhase, setActivePhase] = useState<ActionPhase | null>(null);
 
   // Enhanced handleAction with VFX
   const vfx = vfxRef.current;
-
-  // Remove unused placePiece and movePiece functions
 
   // Pulse animation for selected pieces
   useEffect(() => {
@@ -126,25 +122,19 @@ const UnitGame: React.FC = () => {
   }, [gameState.winner, gameState.vertices, vfx]);
   // Register piece meshes as shadow casters and ground as shadow receiver
   useEffect(() => {
-    // Use scene from hook scope
-    const currentScene = scene;
-    if (!vfx || !currentScene) return;
-
-    Object.values(gameState.vertices as Record<string, Vertex>).forEach((vertex: Vertex) => {
-      if (vertex.stack.length > 0) {
-        const mesh = currentScene.getMeshByName(`piece-${vertex.id}`);
-        if (mesh) {
-          vfx.addShadowCaster(mesh);
-        }
+      if (!scene) return;
+      
+      // Create ground ONCE
+      const existingGround = scene.getMeshByName('ground');
+      if (!existingGround) {
+          const ground = MeshBuilder.CreateGround('ground', { width: 30, height: 30 }, scene);
+          ground.position.y = -10;
+          const groundMat = new StandardMaterial('groundMat', scene);
+          groundMat.diffuseColor = new Color3(0.15, 0.15, 0.2);
+          ground.material = groundMat;
       }
-    });
+  }, [scene]);
 
-    // Ground receives shadows
-    const ground = currentScene.getMeshByName('ground');
-    if (ground) {
-      vfx.enableShadowReceiver(ground);
-    }
-  }, [gameState.vertices, vfx, scene]);
   // Victory celebration effect
   useEffect(() => {
     if (gameState.winner && vfx) {
@@ -166,25 +156,6 @@ const UnitGame: React.FC = () => {
       }, 500);
     }
   }, [gameState.winner, gameState.vertices, vfx]);
-  // Register piece meshes as shadow casters and ground as shadow receiver
-  useEffect(() => {
-    if (!vfx || !scene) return;
-
-    Object.values(gameState.vertices as Record<string, Vertex>).forEach((vertex: Vertex) => {
-      if (vertex.stack.length > 0) {
-        const mesh = scene.getMeshByName(`piece-${vertex.id}`);
-        if (mesh) {
-          vfx.addShadowCaster(mesh);
-        }
-      }
-    });
-
-    // Ground receives shadows
-    const ground = scene.getMeshByName('ground');
-    if (ground) {
-      vfx.enableShadowReceiver(ground);
-    }
-  }, [gameState.vertices, vfx, scene]);
 
   const handlePhaseSelect = useCallback((phase: ActionPhase) => {
     if (phase === 'placement' && gameState.turn.hasPlaced) return;

@@ -149,8 +149,8 @@ export class VisualEffectsManager {
         material.roughness = 0.9;
 
         // Fresnel for edge glow (energy field effect)
-    material.emissiveColor = baseColor.scale(0.6);
-    // BabylonJS PBRMetallicRoughnessMaterial does not have emissiveIntensity, use emissiveColor only
+        material.emissiveColor = baseColor.scale(0.6);
+        // BabylonJS PBRMetallicRoughnessMaterial does not have emissiveIntensity, use emissiveColor only
 
         // Enable alpha blending
         material.transparencyMode = 2; // ALPHABLEND

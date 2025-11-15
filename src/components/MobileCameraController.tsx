@@ -5,6 +5,7 @@ import { useScene } from 'react-babylonjs';
 // Mobile Camera Controller Component
 const MobileCameraController: React.FC = () => {
     const scene = useScene();
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const [touches, setTouches] = useState<Map<number, { x: number; y: number }>>(new Map());
     const lastPinchDistance = useRef<number>(0);
 

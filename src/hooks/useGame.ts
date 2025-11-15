@@ -10,6 +10,7 @@ import {
 import { gameLogger } from '../services/gameLogger';
 import { Capacitor } from '@capacitor/core';
 import { GAME_RULES } from '../game/constants';
+
 export type ActionPhase = 'placement' | 'infusion' | 'movement';
 
 export const useGame = () => {
@@ -28,8 +29,39 @@ export const useGame = () => {
 
     const handleAction = useCallback((action: PlayerAction) => {
         setGameState(prev => {
-            let nextState: GameState = JSON.parse(JSON.stringify(prev));
-            
+            // FIXED: Proper deep copy that preserves Vector3 objects
+            const nextState: GameState = {
+                vertices: Object.fromEntries(
+                    Object.entries(prev.vertices).map(([id, vertex]) => [
+                        id,
+                        {
+                            ...vertex,
+                            position: vertex.position.clone(), // Proper Vector3 clone
+                            stack: [...vertex.stack.map(p => ({ ...p }))],
+                            adjacencies: [...vertex.adjacencies]
+                        }
+                    ])
+                ),
+                players: {
+                    Player1: { ...prev.players.Player1 },
+                    Player2: { ...prev.players.Player2 }
+                },
+                currentPlayerId: prev.currentPlayerId,
+                turn: { ...prev.turn },
+                homeCorners: {
+                    Player1: [...prev.homeCorners.Player1],
+                    Player2: [...prev.homeCorners.Player2]
+                },
+                winner: prev.winner,
+                selectedVertexId: prev.selectedVertexId,
+                validPlacementVertices: [...prev.validPlacementVertices],
+                validInfusionVertices: [...prev.validInfusionVertices],
+                validAttackTargets: [...prev.validAttackTargets],
+                validPincerTargets: { ...prev.validPincerTargets },
+                validMoveOrigins: [...prev.validMoveOrigins],
+                validMoveTargets: [...prev.validMoveTargets],
+            };
+
             switch (action.type) {
                 case 'select':
                     nextState.selectedVertexId = action.vertexId;
@@ -222,4 +254,3 @@ export const useGame = () => {
 
     return { gameState, handleAction };
 };
-
