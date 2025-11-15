@@ -28,6 +28,7 @@ export interface TurnState {
     hasPlaced: boolean;
     hasInfused: boolean;
     hasMoved: boolean;
+    turnNumber: number;
 }
 
 export interface GameState {

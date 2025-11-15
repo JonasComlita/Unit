@@ -7,6 +7,7 @@ import { useGame, ActionPhase } from '../hooks/useGame';
 import GameBoard from './GameBoard';
 import MobileCameraController from './MobileCameraController';
 import MobileHUD from './MobileHUD';
+import DebugPanel from './DebugPanel';
 import { VisualEffectsManager } from '../game/visualEffects';
 import { Vertex } from '../game/types';
 
@@ -40,7 +41,7 @@ const UnitGame: React.FC = () => {
     };
   }, [scene]);
 
-  const { gameState, handleAction: baseHandleAction } = useGame();
+  const { gameState, handleAction: baseHandleAction, undo, moveHistory } = useGame();
   const [activePhase, setActivePhase] = useState<ActionPhase | null>(null);
 
   // Enhanced handleAction with VFX
@@ -228,19 +229,7 @@ const UnitGame: React.FC = () => {
         fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     }}>
       {/* Settings menu for visual quality */}
-      <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 10, background: '#222b', borderRadius: 8, padding: 8 }}>
-        <label htmlFor="visual-quality-select" style={{ color: '#fff', marginRight: 8 }}>Visual Quality:</label>
-        <select
-          id="visual-quality-select"
-          value={visualQuality}
-          onChange={e => handleQualityChange(e.target.value as 'low' | 'medium' | 'high')}
-          style={{ fontSize: 14, padding: 4, borderRadius: 4 }}
-        >
-          <option value="low">Low (Best Performance)</option>
-          <option value="medium">Medium (Balanced)</option>
-          <option value="high">High (Best Quality)</option>
-        </select>
-      </div>
+        {/* Settings are now accessible via the top-left menu -> Settings in MobileHUD */}
       <MobileHUD 
         gameState={gameState} 
         onEndTurn={() => {
@@ -249,6 +238,10 @@ const UnitGame: React.FC = () => {
         }}
         activePhase={activePhase}
         onPhaseSelect={handlePhaseSelect}
+        onUndo={undo}
+        undoCount={moveHistory.length}
+          visualQuality={visualQuality}
+          onQualityChange={handleQualityChange}
       />
       <Engine antialias adaptToDeviceRatio canvasId="babylonJS">
         <Scene>
@@ -271,6 +264,8 @@ const UnitGame: React.FC = () => {
           <GameBoard gameState={gameState} onVertexClick={handleVertexClick} activePhase={activePhase} />
         </Scene>
       </Engine>
+      {/* On-screen debug panel (toggleable) */}
+      <DebugPanel gameState={gameState} />
     </div>
   );
 };

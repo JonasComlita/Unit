@@ -4,6 +4,7 @@ import { Vector3, Quaternion, Color3, Mesh, PointerInfo, PointerEventTypes } fro
 import { GameState, Piece, Vertex } from '../game/types';
 import { getForce } from '../game/gameLogic';
 import { ActionPhase } from '../hooks/useGame';
+import { extractVertexIdFromMeshName } from './gameboardUtils';
 
 // Game Board Component
 const GameBoard: React.FC<{ gameState: GameState; onVertexClick: (id: string) => void; activePhase: ActionPhase | null }> = ({ gameState, onVertexClick, activePhase }) => {
@@ -24,8 +25,21 @@ const GameBoard: React.FC<{ gameState: GameState; onVertexClick: (id: string) =>
                 const pickInfo = pointerInfo.pickInfo;
                 if (pickInfo && pickInfo.hit && pickInfo.pickedMesh) {
                     const clickedMesh = pickInfo.pickedMesh as Mesh;
-                    if (clickedMesh.name.startsWith('vertex-')) {
-                        onVertexClick(clickedMesh.name);
+                    const name = clickedMesh.name || '';
+
+                    // Try to extract a vertex id from the mesh name even if the mesh is
+                    // an overlay (e.g. `indicator-vertex-8`, `mat-tap-vertex-8`, etc.)
+                    const vertexId = extractVertexIdFromMeshName(name);
+                    if (vertexId) {
+                        onVertexClick(vertexId);
+                        return;
+                    }
+
+                    // Fallback: piece naming: piece_{vertexId}_{pieceId}
+                    if (name.startsWith('piece_')) {
+                        const parts = name.split('_');
+                        const vertexId = parts[1];
+                        if (vertexId) onVertexClick(vertexId);
                     }
                 }
             }
@@ -132,7 +146,7 @@ const GameBoard: React.FC<{ gameState: GameState; onVertexClick: (id: string) =>
                         const stackOffset = new Vector3(0, (stackIndex + 1) * 0.5, 0);
                         const piecePosition = pos.add(stackOffset);
                         return (
-                            <sphere key={piece.id} name={`piece-${piece.id}`} diameter={0.45} segments={12} position={piecePosition}>
+                            <sphere key={piece.id} name={`piece_${vertex.id}_${piece.id}`} diameter={0.45} segments={12} position={piecePosition}>
                                 <standardMaterial name={`mat-piece-${piece.id}`} diffuseColor={color} specularColor={Color3.Black()} />
                             </sphere>
                         );

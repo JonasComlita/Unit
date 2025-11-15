@@ -21,7 +21,8 @@
   "devDependencies": {
     "@types/msgpack-lite": "latest",
     "@types/react": "latest",
-    "@types/react-dom": "latest"
+    "@types/react-dom": "latest",
+    "@types/jest": "latest"
   },
   "scripts": {
     "start": "react-scripts start",

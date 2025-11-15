@@ -1,5 +1,6 @@
 // src/hooks/useGame.ts
 import { useState, useCallback, useEffect } from 'react';
+import { Vector3 } from '@babylonjs/core';
 import { GameState, PlayerAction, Piece } from '../game/types';
 import { 
     initializeGameState, 
@@ -14,21 +15,91 @@ import { GAME_RULES } from '../game/constants';
 export type ActionPhase = 'placement' | 'infusion' | 'movement';
 
 export const useGame = () => {
+    // Load saved game from localStorage if available, else initialize
     const [gameState, setGameState] = useState<GameState>(() => {
+        try {
+            const raw = localStorage.getItem('currentGame');
+            if (raw) {
+                const parsed = JSON.parse(raw) as GameState & { vertices: Record<string, any> };
+                // Rehydrate Vector3 positions
+                Object.values(parsed.vertices).forEach((v: any) => {
+                    v.position = new Vector3(v.position.x, v.position.y, v.position.z);
+                });
+                // Start logging
+                const platform = Capacitor.isNativePlatform() 
+                    ? Capacitor.getPlatform() as 'ios' | 'android'
+                    : 'web';
+                gameLogger.startGame(platform);
+                const validActions = calculateValidActions(parsed as GameState);
+                return { ...(parsed as GameState), ...validActions };
+            }
+        } catch (e) {
+            console.warn('Failed to load saved game, initializing new game', e);
+        }
+
         const initialState = initializeGameState();
         const validActions = calculateValidActions(initialState);
-        
         // Start logging
         const platform = Capacitor.isNativePlatform() 
             ? Capacitor.getPlatform() as 'ios' | 'android'
             : 'web';
         gameLogger.startGame(platform);
-        
         return { ...initialState, ...validActions };
     });
 
+    // History for undo
+    const [moveHistory, setMoveHistory] = useState<GameState[]>([]);
+
+    // Helper to deep-clone GameState while preserving Vector3
+    const cloneGameState = (s: GameState): GameState => ({
+        ...s,
+        vertices: Object.fromEntries(Object.entries(s.vertices).map(([id, v]) => [
+            id,
+            {
+                ...v,
+                position: v.position.clone(),
+                stack: v.stack.map(p => ({ ...p })),
+                adjacencies: [...v.adjacencies]
+            }
+        ])),
+        players: { ...s.players },
+        currentPlayerId: s.currentPlayerId,
+        turn: { ...s.turn },
+        homeCorners: { Player1: [...s.homeCorners.Player1], Player2: [...s.homeCorners.Player2] },
+        winner: s.winner,
+        selectedVertexId: s.selectedVertexId,
+        validPlacementVertices: [...s.validPlacementVertices],
+        validInfusionVertices: [...s.validInfusionVertices],
+        validAttackTargets: [...s.validAttackTargets],
+        validPincerTargets: { ...s.validPincerTargets },
+        validMoveOrigins: [...s.validMoveOrigins],
+        validMoveTargets: [...s.validMoveTargets],
+    });
+
+    // Undo function exposed to UI
+    const undo = () => {
+        setMoveHistory(prev => {
+            if (prev.length === 0) return prev;
+            const previousState = prev[prev.length - 1];
+            setGameState(previousState);
+            return prev.slice(0, -1);
+        });
+    };
+
     const handleAction = useCallback((action: PlayerAction) => {
         setGameState(prev => {
+            // Push snapshot for undo (limit history to 50)
+            try {
+                setMoveHistory(h => {
+                    const next = [...h, cloneGameState(prev)];
+                    const MAX = 50;
+                    if (next.length > MAX) next.splice(0, next.length - MAX);
+                    return next;
+                });
+            } catch (e) {
+                console.warn('Failed to push move history', e);
+            }
+
             // FIXED: Proper deep copy that preserves Vector3 objects
             const nextState: GameState = {
                 vertices: Object.fromEntries(
@@ -95,11 +166,17 @@ export const useGame = () => {
                     if (!prev.turn.hasMoved && 
                         prev.validMoveOrigins.includes(action.fromId) && 
                         prev.validMoveTargets.includes(action.toId)) {
-                        
                         const source = nextState.vertices[action.fromId];
                         const target = nextState.vertices[action.toId];
-                        target.stack = source.stack;
-                        target.energy = source.energy;
+                        if (target.stack.length > 0 && target.stack[0].player === nextState.currentPlayerId) {
+                            // Stacking: combine stacks and sum energy
+                            target.stack = [...target.stack, ...source.stack];
+                            target.energy += source.energy;
+                        } else {
+                            // Move to empty or enemy vertex (shouldn't happen for enemy due to validation)
+                            target.stack = source.stack;
+                            target.energy = source.energy;
+                        }
                         source.stack = [];
                         source.energy = 0;
                         nextState.turn.hasMoved = true;
@@ -152,7 +229,7 @@ export const useGame = () => {
                         // End turn
                         nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
                         nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
-                        nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false };
+                        nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
                         nextState.selectedVertexId = null;
                     }
                     break;
@@ -214,7 +291,7 @@ export const useGame = () => {
                             // End turn
                             nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
                             nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
-                            nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false };
+                            nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
                             nextState.selectedVertexId = null;
                         }
                     }
@@ -224,7 +301,7 @@ export const useGame = () => {
                     if (prev.turn.hasPlaced && prev.turn.hasInfused && prev.turn.hasMoved) {
                         nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
                         nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
-                        nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false };
+                        nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
                         nextState.selectedVertexId = null;
                     }
                     break;
@@ -252,5 +329,23 @@ export const useGame = () => {
         gameLogger.syncPendingGames();
     }, []);
 
-    return { gameState, handleAction };
+    // Persist gameState to localStorage on change (serialize Vector3)
+    useEffect(() => {
+        try {
+            const serializable = {
+                ...gameState,
+                vertices: Object.fromEntries(
+                    Object.entries(gameState.vertices).map(([id, v]) => [
+                        id,
+                        { ...v, position: { x: v.position.x, y: v.position.y, z: v.position.z } }
+                    ])
+                )
+            };
+            localStorage.setItem('currentGame', JSON.stringify(serializable));
+        } catch (e) {
+            console.warn('Failed to save game to localStorage', e);
+        }
+    }, [gameState]);
+
+    return { gameState, handleAction, undo, moveHistory };
 };

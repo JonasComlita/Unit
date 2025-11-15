@@ -74,7 +74,7 @@ export const getAdjacencies = (
 
             // Only add if the closest vertex is very close (essentially directly above/below)
             // Use a very tight threshold - only connect if nearly aligned
-            const threshold = 0.1; // Very small - only vertically aligned vertices
+            const threshold = 0.4; // Very small - only vertically aligned vertices
             if (closestVertex && minDistance < threshold) {
                 adj.push(closestVertex.id);
             }
@@ -105,8 +105,7 @@ export const initializeGameState = (): GameState => {
                     layerY, 
                     (z - offset) * vertexSpacing
                 );
-                // Debug log: print vertex initialization info
-                console.log(`[initVertex] ${id} L${layerIndex} x=${x} z=${z} pos=(${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`);
+                // vertex initialization
                 const newVertex: Vertex = {
                     id,
                     position: pos,
@@ -148,7 +147,7 @@ export const initializeGameState = (): GameState => {
             Player2: { id: 'Player2', reinforcements: GAME_RULES.initialReinforcements } 
         },
         currentPlayerId: 'Player1',
-        turn: { hasPlaced: false, hasInfused: false, hasMoved: false },
+    turn: { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: 1 },
         homeCorners: { 
             Player1: [p1BottomCorner!.id, p1TopCorner!.id], 
             Player2: [p2BottomCorner!.id, p2TopCorner!.id] 
@@ -165,6 +164,7 @@ export const initializeGameState = (): GameState => {
 };
 
 export const calculateValidActions = (state: GameState): Partial<GameState> => {
+    const DEBUG_MOVE = true; // set to true to enable move debugging logs
     const { vertices, currentPlayerId, turn, selectedVertexId, players, homeCorners } = state;
     const updates: Partial<GameState> = {
         validPlacementVertices: [],
@@ -174,6 +174,8 @@ export const calculateValidActions = (state: GameState): Partial<GameState> => {
         validMoveOrigins: [],
         validMoveTargets: [],
     };
+
+    // No debug logging here (removed temporary diagnostics)
 
     // Placement
     if (!turn.hasPlaced && players[currentPlayerId].reinforcements > 0) {
@@ -196,11 +198,13 @@ export const calculateValidActions = (state: GameState): Partial<GameState> => {
         updates.validMoveOrigins = Object.values(vertices)
             .filter(v => v.stack.length > 0 && v.stack[0].player === currentPlayerId)
             .map(v => v.id);
+        if (DEBUG_MOVE) console.debug('[calculateValidActions] validMoveOrigins=', updates.validMoveOrigins);
     }
     
     // Attack & Move Targets
     if (selectedVertexId) {
         const selectedVertex = vertices[selectedVertexId];
+        if (DEBUG_MOVE) console.debug('[calculateValidActions] selectedVertexId=', selectedVertexId, 'currentPlayerId=', currentPlayerId, 'selectedOwner=', selectedVertex.stack[0]?.player, 'stackOwners=', selectedVertex.stack.map(s=>s.player));
         if (selectedVertex.stack[0]?.player === currentPlayerId) {
             // Attack targets
             if (isOccupied(selectedVertex)) {
@@ -211,10 +215,31 @@ export const calculateValidActions = (state: GameState): Partial<GameState> => {
             }
             // Move targets
             if (!turn.hasMoved && (updates.validMoveOrigins ?? []).includes(selectedVertexId)) {
+                if (DEBUG_MOVE) console.debug('[calculateValidActions] selectedVertex', selectedVertexId, 'stackLen=', selectedVertex.stack.length);
                 updates.validMoveTargets = selectedVertex.adjacencies.filter(id => {
                     const targetVertex = vertices[id];
-                    if (targetVertex.stack.length > 0) return false;
-                    return isOccupied(selectedVertex, targetVertex.layer);
+                    // Allow moving onto friendly pieces (stacking)
+                    // Only block if target has ENEMY pieces
+                    if (targetVertex.stack.length > 0) {
+                        const targetOwner = targetVertex.stack[0].player;
+                        if (targetOwner !== currentPlayerId) {
+                            if (DEBUG_MOVE) console.debug('[calculateValidActions] target', id, 'blocked: enemy present');
+                            return false; // Can't move onto enemy
+                        }
+                        // Allow stacking with friendly pieces
+                    }
+                    // If the moving stack contains multiple pieces, allow movement
+                    // (stacks can collapse/move even if they don't meet 'occupied' thresholds).
+                    if (selectedVertex.stack.length > 1) {
+                        if (DEBUG_MOVE) console.debug('[calculateValidActions] target', id, 'allowed: multi-piece stack');
+                        return true;
+                    }
+
+                    // Otherwise, require the source to meet occupation requirements
+                    // for the destination layer.
+                    const ok = isOccupied(selectedVertex, targetVertex.layer);
+                    if (DEBUG_MOVE) console.debug('[calculateValidActions] target', id, 'isOccupied?', ok);
+                    return ok;
                 });
             }
         }
@@ -232,6 +257,8 @@ export const calculateValidActions = (state: GameState): Partial<GameState> => {
         }
     });
     updates.validPincerTargets = pincerMap;
+
+    // No debug logging here (removed temporary diagnostics)
 
     return updates;
 };

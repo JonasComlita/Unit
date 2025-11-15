@@ -121,7 +121,7 @@ const useGame = () => {
         Player2: { id: 'Player2', reinforcements: 1 } 
       },
       currentPlayerId: 'Player1',
-      turn: { hasPlaced: false, hasInfused: false, hasMoved: false },
+    turn: { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: 1 },
       homeCorners: { 
         Player1: [p1BottomCorner!.id, p1TopCorner!.id], 
         Player2: [p2BottomCorner!.id, p2TopCorner!.id] 
@@ -294,7 +294,7 @@ const useGame = () => {
                     // Attack ends the turn
                     nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
                     nextState.players[nextState.currentPlayerId].reinforcements += 1;
-                    nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false };
+                    nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
                     nextState.selectedVertexId = null;
                 }
                 break;
@@ -342,7 +342,7 @@ const useGame = () => {
                         // Pincer ends the turn (same as attack)
                         nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
                         nextState.players[nextState.currentPlayerId].reinforcements += 1;
-                        nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false };
+                        nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
                         nextState.selectedVertexId = null;
                     }
                 }
@@ -352,7 +352,7 @@ const useGame = () => {
                 if (prev.turn.hasPlaced && prev.turn.hasInfused && prev.turn.hasMoved) {
                     nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
                     nextState.players[nextState.currentPlayerId].reinforcements += 1;
-                    nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false };
+                    nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
                     nextState.selectedVertexId = null;
                 }
                 break;
