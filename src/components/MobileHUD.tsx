@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getForce } from '../game/gameLogic';
-import { BOARD_CONFIG } from '../game/constants';
+import { BOARD_CONFIG, GAME_RULES, getOccupationRequirement } from '../game/constants';
 
 // Mock types for the example
 type PlayerId = 'Player1' | 'Player2';
@@ -40,6 +40,8 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
   const { turn, currentPlayerId, winner, players, selectedVertexId, validAttackTargets, validMoveTargets, vertices } = gameState;
   const [showMenu, setShowMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [showQuickHelp, setShowQuickHelp] = useState(false);
   const [panelState, setPanelState] = useState<PanelState>('default');
   const [message, setMessage] = useState<string | null>(null);
   const [activeAction, setActiveAction] = useState<'move' | 'attack' | 'infuse' | null>(null);
@@ -263,11 +265,30 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
             transition: 'all 0.2s ease',
           }}
           onClick={() => {
-            // Open tutorial (placeholder)
+            // Open tutorial modal
             setShowMenu(false);
+            setShowTutorial(true);
           }}
           >
             📖 Tutorial
+          </button>
+          <button style={{
+            width: '100%',
+            padding: '12px',
+            marginTop: '8px',
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.18)',
+            borderRadius: '8px',
+            color: 'white',
+            fontSize: '14px',
+            cursor: 'pointer',
+          }}
+          onClick={() => {
+            setShowQuickHelp(s => !s);
+            setShowMenu(false);
+          }}
+          >
+            ⚙️ Quick Help
           </button>
           <button style={{
             width: '100%',
@@ -327,6 +348,100 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
             >
               Close
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Tutorial Modal */}
+      {showTutorial && (
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 250, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 'min(920px, 95%)', maxHeight: '85%', background: '#0b1020', border: '2px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 20, color: 'white', overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ margin: 0 }}>How to Play — Quick Tutorial</h2>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setShowQuickHelp(s => !s)} style={{ padding: '6px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.06)', color: 'white', border: '1px solid rgba(255,255,255,0.08)' }}>Toggle Numeric Help</button>
+                <button onClick={() => setShowTutorial(false)} style={{ padding: '6px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.12)', color: 'white', border: '1px solid rgba(255,255,255,0.12)' }}>Close</button>
+              </div>
+            </div>
+
+            <section style={{ marginBottom: 12 }}>
+              <h3>Goal</h3>
+              <p>Each player controls two home corners. Win by occupying all of your opponent’s home corners with your pieces (the piece on top of the stack controls a corner).</p>
+            </section>
+
+            <section style={{ marginBottom: 12 }}>
+              <h3>Turn Rewards</h3>
+              <p>At the start of your turn you gain <strong>+1 piece</strong> and <strong>+1 energy</strong>. New pieces must be placed onto one of your home corners. New energy can be infused into any vertex that already contains your pieces.</p>
+            </section>
+
+            <section style={{ marginBottom: 12 }}>
+              <h3>Three Actions per Turn</h3>
+              <ol>
+                <li><strong>Place</strong> — place your reinforcement on a home corner.</li>
+                <li><strong>Infuse</strong> — add one energy to a friendly vertex.</li>
+                <li><strong>Move</strong> — move a stack or single piece to an adjacent vertex (can also initiate attacks or pincers).</li>
+              </ol>
+            </section>
+
+            <section style={{ marginBottom: 12 }}>
+              <h3>Board Layers & Gravity</h3>
+              <p>The board has 5 layers (outer → center → outer): <code>[3×3, 5×5, 7×7, 5×5, 3×3]</code>. Each layer has a gravity value that reduces effective force. Gravity values: <strong>{BOARD_CONFIG.layerGravity.join(', ')}</strong>.</p>
+            </section>
+
+            <section style={{ marginBottom: 12 }}>
+              <h3>Force</h3>
+              <p>Force for a vertex = (stack size × vertex energy) / layer gravity. Force is clamped to a maximum of <strong>{GAME_RULES.forceCapMax}</strong>. Force determines attack outcomes and some movement rules.</p>
+            </section>
+
+            <section style={{ marginBottom: 12 }}>
+              <h3>Movement Requirements</h3>
+              <p>Moving a single piece into an empty vertex requires the source to meet the destination layer’s occupation thresholds (pieces, energy, and force). Multi-piece stacks can move more freely.</p>
+              <ul>
+                {BOARD_CONFIG.layout.map((size, idx) => {
+                  const req = getOccupationRequirement(idx);
+                  return (
+                    <li key={idx}>Layer {idx} ({size}×{size}): minPieces={req.minPieces}, minEnergy={req.minEnergy}, minForce={req.minForce}</li>
+                  );
+                })}
+              </ul>
+            </section>
+
+            <section style={{ marginBottom: 12 }}>
+              <h3>Attacking</h3>
+              <p>Select a friendly vertex and then an adjacent enemy-occupied vertex to attack. Compare attacker vs defender force. The result produces <em>newPieces</em> = |attackerPieces − defenderPieces| and <em>newEnergy</em> = |attackerEnergy − defenderEnergy|. If attackerForce &gt; defenderForce the attacker conquers the vertex (replaced with newPieces of attacker); otherwise the defender holds and attacker is removed.</p>
+            </section>
+
+            <section style={{ marginBottom: 12 }}>
+              <h3>Pincer</h3>
+              <p>A pincer attack uses two or more neighboring friendly origins against one target. Attacker force is the product of origin forces (then clamped). Pieces and energy sum across origins. If attackerForce &gt; defenderForce the target is conquered; otherwise origins are cleared. The maximum pincer participants is <strong>{GAME_RULES.maxPincerParticipants}</strong>.</p>
+            </section>
+
+            <section style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed rgba(255,255,255,0.06)' }}>
+              <h4>Examples</h4>
+              <p>See the in-game examples in the manual or try test attacks in the sandbox.</p>
+            </section>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Help Overlay (numeric rules) */}
+      {showQuickHelp && (
+        <div style={{ position: 'absolute', top: 84, right: 12, zIndex: 240 }}>
+          <div style={{ width: 320, background: 'rgba(8,10,18,0.95)', color: 'white', borderRadius: 10, padding: 12, border: '1px solid rgba(255,255,255,0.06)', fontSize: 13, fontFamily: 'monospace' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <strong>Quick Numeric Help</strong>
+              <button onClick={() => setShowQuickHelp(false)} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }}>✕</button>
+            </div>
+            <div><strong>Gravity:</strong> [{BOARD_CONFIG.layerGravity.join(', ')}]</div>
+            <div style={{ marginTop: 8 }}><strong>Occupation thresholds:</strong></div>
+            <div style={{ marginTop: 6 }}>
+              {BOARD_CONFIG.layout.map((size, idx) => {
+                const req = getOccupationRequirement(idx);
+                return (<div key={idx}>L{idx} ({size}×{size}): pieces&gt;={req.minPieces}, energy&gt;={req.minEnergy}, force&gt;={req.minForce}</div>);
+              })}
+            </div>
+            <div style={{ marginTop: 8 }}><strong>Force formula:</strong> (stackSize × energy) / gravity, capped at {GAME_RULES.forceCapMax}</div>
+            <div style={{ marginTop: 8 }}><strong>Reinforcements:</strong> +{GAME_RULES.reinforcementsPerTurn} per turn</div>
           </div>
         </div>
       )}
