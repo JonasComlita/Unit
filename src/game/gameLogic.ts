@@ -22,9 +22,11 @@ export const isOccupied = (vertex: Vertex, requirementLayer?: number): boolean =
            force >= req.minForce;
 };
 
+// Replace the getAdjacencies function in gameLogic.ts
+
 export const getAdjacencies = (
-    vertex: Vertex, 
-    layerGrid: Vertex[][][], 
+    vertex: Vertex,
+    layerGrid: Vertex[][][],
     boardLayout: number[]
 ): string[] => {
     const { layer, position, vertexSpacing } = vertex;
@@ -34,28 +36,52 @@ export const getAdjacencies = (
     const z = vertexSpacing > 0 ? Math.round(position.z / vertexSpacing + offset) : 0;
     const adj: string[] = [];
 
-    // Same layer neighbors (4-connected)
+    // --- 1. Same layer neighbors (4-connected grid) ---
     const neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
     neighbors.forEach(([dx, dz]) => {
-        const nx = (x + dx + size) % size;
-        const nz = (z + dz + size) % size;
-        adj.push(layerGrid[layer][nx][nz].id);
+        const nx = x + dx;
+        const nz = z + dz;
+        // Check bounds
+        if (nx >= 0 && nx < size && nz >= 0 && nz < size) {
+            adj.push(layerGrid[layer][nx][nz].id);
+        }
     });
 
-    // Adjacent layers
-    [layer - 1, layer + 1].forEach(nextLayer => {
-        if (nextLayer >= 0 && nextLayer < boardLayout.length) {
-            const nextSize = boardLayout[nextLayer];
-            const scale = nextSize / size;
-            const nx = Math.round(x * scale);
-            const nz = Math.round(z * scale);
-            if (layerGrid[nextLayer]?.[nx]?.[nz]) {
-                 adj.push(layerGrid[nextLayer][nx][nz].id);
+    // --- 2. Adjacent layers (find closest vertex by world position) ---
+    [layer - 1, layer + 1].forEach(targetLayer => {
+        if (targetLayer >= 0 && targetLayer < boardLayout.length) {
+            // Find the vertex on targetLayer that is closest in XZ plane
+            let closestVertex: Vertex | null = null;
+            let minDistance = Infinity;
+
+            // Iterate through the 2D grid properly
+            const targetSize = boardLayout[targetLayer];
+            for (let tx = 0; tx < targetSize; tx++) {
+                for (let tz = 0; tz < targetSize; tz++) {
+                    const targetVertex = layerGrid[targetLayer][tx][tz];
+                    
+                    // Calculate XZ distance (ignore Y since layers are at different heights)
+                    const dx = targetVertex.position.x - position.x;
+                    const dz = targetVertex.position.z - position.z;
+                    const distance = Math.sqrt(dx * dx + dz * dz);
+
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        closestVertex = targetVertex;
+                    }
+                }
+            }
+
+            // Only add if the closest vertex is very close (essentially directly above/below)
+            // Use a very tight threshold - only connect if nearly aligned
+            const threshold = 0.1; // Very small - only vertically aligned vertices
+            if (closestVertex && minDistance < threshold) {
+                adj.push(closestVertex.id);
             }
         }
     });
-    
-    return Array.from(new Set(adj));
+
+    return Array.from(new Set(adj)); // Remove duplicates
 };
 
 export const initializeGameState = (): GameState => {
@@ -79,6 +105,8 @@ export const initializeGameState = (): GameState => {
                     layerY, 
                     (z - offset) * vertexSpacing
                 );
+                // Debug log: print vertex initialization info
+                console.log(`[initVertex] ${id} L${layerIndex} x=${x} z=${z} pos=(${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`);
                 const newVertex: Vertex = {
                     id,
                     position: pos,

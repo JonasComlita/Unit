@@ -263,6 +263,7 @@ const UnitGame: React.FC = () => {
             lowerRadiusLimit={20} 
             upperRadiusLimit={80}
             panningSensibility={0}
+            onCreated={camera => camera.attachControl(true)}
           />
           <MobileCameraController />
           <hemisphericLight name="light1" intensity={0.9} direction={Vector3.Up()} />

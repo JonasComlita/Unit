@@ -51,14 +51,14 @@ const MobileCameraController: React.FC = () => {
                     if (oldArray.length === 2) {
                         const avgDx = ((touchArray[0].x - oldArray[0].x) + (touchArray[1].x - oldArray[1].x)) / 2;
                         if ('alpha' in camera) {
-                            (camera as any).alpha += avgDx * 0.01;
+                            (camera as any).alpha -= avgDx * 0.01;
                         }
                     }
                 } else if (newTouches.size === 1) {
                     // Single finger rotation
                     const dx = evt.clientX - oldTouch.x;
                     if ('alpha' in camera) {
-                        (camera as any).alpha += dx * 0.01;
+                        (camera as any).alpha -= dx * 0.01;
                     }
                 }
 
