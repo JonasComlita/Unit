@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import { extractVertexIdFromMeshName } from '../gameboardUtils';
 
 describe('extractVertexIdFromMeshName', () => {

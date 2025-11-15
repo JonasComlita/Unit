@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { getForce } from '../game/gameLogic';
+import { BOARD_CONFIG } from '../game/constants';
 
 // Mock types for the example
 type PlayerId = 'Player1' | 'Player2';
@@ -180,26 +182,38 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
           </div>
         </div>
 
-        {/* Reinforcements */}
+        {/* Player summary: total pieces & total energy on board */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
-          background: 'rgba(255,255,255,0.1)',
-          padding: '10px 14px',
-          borderRadius: '25px',
-          border: '2px solid rgba(255,255,255,0.2)',
+          gap: '12px',
+          background: 'rgba(255,255,255,0.06)',
+          padding: '8px 12px',
+          borderRadius: '18px',
+          border: '2px solid rgba(255,255,255,0.08)',
         }}>
-          <span style={{ fontSize: '22px' }}>⚡</span>
-          <span style={{ 
-            color: 'white', 
-            fontSize: '20px', 
-            fontWeight: 'bold',
-            minWidth: '24px',
-            textAlign: 'center',
-          }}>
-            {players[currentPlayerId].reinforcements}
-          </span>
+          {/* compute totals */}
+          {(() => {
+            const totals = Object.values(vertices).reduce((acc, v) => {
+              const ownPieces = v.stack.filter(p => p.player === currentPlayerId).length;
+              acc.pieces += ownPieces;
+              // energy is attributed to vertex owner (top of stack)
+              if (v.stack.length > 0 && v.stack[0].player === currentPlayerId) acc.energy += v.energy;
+              return acc;
+            }, { pieces: 0, energy: 0 });
+            return (
+              <>
+                <div style={{ textAlign: 'center', color: 'white' }}>
+                  <div style={{ fontSize: 16, fontWeight: '700' }}>♟️ {totals.pieces}</div>
+                  <div style={{ fontSize: 12, opacity: 0.85 }}>Pieces</div>
+                </div>
+                <div style={{ textAlign: 'center', color: 'white' }}>
+                  <div style={{ fontSize: 16, fontWeight: '700' }}>⚡ {totals.energy}</div>
+                  <div style={{ fontSize: 12, opacity: 0.85 }}>Energy</div>
+                </div>
+              </>
+            );
+          })()}
         </div>
         {/* Undo Button */}
         <div style={{ marginLeft: 12 }}>
@@ -544,8 +558,19 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                     <div style={{ color: 'white', fontSize: '16px', fontWeight: 'bold' }}>
                       {currentPlayerId === 'Player1' ? 'Blue' : 'Red'} Unit
                     </div>
-                    <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '13px' }}>
-                      Stack: {selectedVertex.stack.length} | Energy: ⚡{selectedVertex.energy}
+                    <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '13px' }}>
+                      {(() => {
+                        const gravity = BOARD_CONFIG.layerGravity[selectedVertex.layer] ?? 1;
+                        const force = getForce(selectedVertex as any);
+                        return (
+                          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                            <div>Stack: <strong>{selectedVertex.stack.length}</strong></div>
+                            <div>Energy: <strong>⚡{selectedVertex.energy}</strong></div>
+                            <div>Gravity: <strong>{gravity}</strong></div>
+                            <div>Force: <strong>{force.toFixed(2)}</strong></div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
