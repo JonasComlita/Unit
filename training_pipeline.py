@@ -103,6 +103,8 @@ import asyncpg
 import json
 import logging
 import os
+import glob
+import random
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Tuple
@@ -154,11 +156,12 @@ class GameDataset(Dataset):
         """
         Args:
             states: [N, num_vertices, 5] game states
-            moves: [N, num_vertices * 4] move probabilities (policy targets)
+            moves: [N] class indices (policy target indices in range num_vertices*4)
             outcomes: [N] game outcomes (-1, 0, 1)
         """
         self.states = torch.FloatTensor(states)
-        self.moves = torch.FloatTensor(moves)
+        # Policy targets should be class indices (long) for cross-entropy
+        self.moves = torch.LongTensor(moves)
         self.outcomes = torch.FloatTensor(outcomes)
     
     def __len__(self):
@@ -166,6 +169,27 @@ class GameDataset(Dataset):
     
     def __getitem__(self, idx):
         return self.states[idx], self.moves[idx], self.outcomes[idx]
+
+
+class ShardedIterableDataset(torch.utils.data.IterableDataset):
+    """Iterable dataset that lazily yields examples from compressed .npz shards."""
+
+    def __init__(self, shard_files: List[str]):
+        super().__init__()
+        self.shard_files = list(shard_files)
+
+    def __iter__(self):
+        for shard in self.shard_files:
+            try:
+                with np.load(shard, allow_pickle=False) as data:
+                    states = data['states']
+                    policies = data['policies']
+                    values = data['values']
+                    for i in range(len(states)):
+                        # yield row-wise: numpy arrays and scalars; DataLoader will collate
+                        yield states[i], policies[i], values[i]
+            except Exception as e:
+                logger.warning(f"Failed to read shard {shard}: {e}")
 
 
 class DataLoader:
@@ -180,14 +204,14 @@ class DataLoader:
         self.pool = await asyncpg.create_pool(self.database_url)
         logger.info("Connected to database")
     
-    async def load_games(self, limit: int = None) -> List[Dict]:
+    async def load_games(self, batch_size: int = 1000, limit: int = None):
         """
-        Load games from database.
-        
-        Returns:
-            List of game dictionaries with moves
+        Async generator that yields lists of games (dicts) fetched in batches.
+
+        This avoids loading all games into memory at once. It uses LIMIT/OFFSET
+        pagination; for very large tables consider server-side cursors.
         """
-        query = """
+        base_query = """
             SELECT g.game_id, g.winner, g.total_moves,
                    array_agg(
                        json_build_object(
@@ -203,24 +227,31 @@ class DataLoader:
             GROUP BY g.game_id
             ORDER BY g.start_time DESC
         """
-        
-        if limit:
-            query += f" LIMIT {limit}"
-        
+
+        offset = 0
+        fetched = 0
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(query)
-        
-        games = []
-        for row in rows:
-            games.append({
-                'game_id': row['game_id'],
-                'winner': row['winner'],
-                'total_moves': row['total_moves'],
-                'moves': row['moves']
-            })
-        
-        logger.info(f"Loaded {len(games)} games from database")
-        return games
+            while True:
+                q = base_query + f" LIMIT {batch_size} OFFSET {offset}"
+                rows = await conn.fetch(q)
+                if not rows:
+                    break
+
+                games = []
+                for row in rows:
+                    games.append({
+                        'game_id': row['game_id'],
+                        'winner': row['winner'],
+                        'total_moves': row['total_moves'],
+                        'moves': row['moves']
+                    })
+
+                yield games
+
+                offset += len(rows)
+                fetched += len(rows)
+                if limit and fetched >= limit:
+                    break
     
     async def close(self):
         """Close database connection."""
@@ -240,7 +271,7 @@ class TrainingDataProcessor:
         
         Returns:
             states: [N, num_vertices, 5] - game states
-            policies: [N, num_vertices * 4] - move distributions
+            policies: [N] - policy class indices (int in [0, num_vertices*4))
             values: [N] - game outcomes
         """
         states = []
@@ -260,9 +291,12 @@ class TrainingDataProcessor:
                 state_tensor = state_to_tensor(state, self.num_vertices)
                 states.append(state_tensor)
                 
-                # Convert move to policy target (one-hot encoding)
-                policy = self._move_to_policy(move_data, state)
-                policies.append(policy)
+                # Convert move to policy target (class index)
+                policy_idx = self._move_to_policy(move_data, state)
+                # skip if we couldn't derive a valid action index
+                if policy_idx is None or policy_idx < 0:
+                    continue
+                policies.append(policy_idx)
                 
                 # Flip outcome based on whose turn it was
                 player = move_data['player_id']
@@ -273,62 +307,65 @@ class TrainingDataProcessor:
         
         return (
             np.array(states),
-            np.array(policies),
-            np.array(values)
+            np.array(policies, dtype=np.int64),
+            np.array(values, dtype=np.float32)
         )
     
     def _parse_state(self, move_data: Dict) -> Dict:
         """Parse game state from move data."""
-        # Assuming your moves table stores state_before in action_data
-        # Adjust based on your actual schema
+        # Extract and parse action_data and the serialized state_before
         try:
             action_data = move_data.get('action_data', {})
             if isinstance(action_data, str):
                 action_data = json.loads(action_data)
-            
-            # You'll need to reconstruct game state from your data
-            # This is a placeholder - adjust to your schema
-            return action_data.get('state_before')
+
+            # Many schemas store the pre-move state as a JSON string under
+            # action_data['state_before'] or similar. Adjust if your schema
+            # differs.
+            state_before = action_data.get('state_before')
+            if state_before is None:
+                return None
+            if isinstance(state_before, str):
+                return json.loads(state_before)
+            return state_before
         except Exception as e:
             logger.warning(f"Failed to parse state: {e}")
             return None
     
     def _move_to_policy(self, move_data: Dict, state: Dict) -> np.ndarray:
         """
-        Convert move to policy target vector.
-        
-        Policy vector format: [num_vertices * 4]
-        For each vertex: [place_prob, infuse_prob, move_prob, attack_prob]
+        Convert move to a single class index in range [0, num_vertices*4).
+
+        Index layout: vertex_idx * 4 + action_offset
+        Returns integer index, or None if it can't be derived.
         """
-        policy = np.zeros(self.num_vertices * 4)
-        
         try:
             action_data = move_data.get('action_data', {})
             if isinstance(action_data, str):
                 action_data = json.loads(action_data)
-            
+
             action_type = action_data.get('type')
             vertex_id = action_data.get('vertexId') or action_data.get('fromId')
-            
+
             # Map vertex_id to index (you'll need your vertex mapping)
             vertex_idx = self._vertex_id_to_index(vertex_id, state)
             if vertex_idx is None:
-                return policy
-            
-            # Set probability to 1.0 for the action taken
+                return None
+
             action_offset = {
                 'place': 0,
                 'infuse': 1,
                 'move': 2,
                 'attack': 3
-            }.get(action_type, 0)
-            
-            policy[vertex_idx * 4 + action_offset] = 1.0
-            
+            }.get(action_type, None)
+
+            if action_offset is None:
+                return None
+
+            return int(vertex_idx * 4 + action_offset)
         except Exception as e:
             logger.warning(f"Failed to convert move to policy: {e}")
-        
-        return policy
+            return None
     
     def _vertex_id_to_index(self, vertex_id: str, state: Dict) -> int:
         """Map vertex ID to index in tensor."""
@@ -393,68 +430,148 @@ class TrainingPipeline:
     
     async def train_model(self):
         """Train neural network on database game data."""
-        logger.info("Loading training data from database...")
-        
+        logger.info("Streaming training data from database and sharding to disk...")
+
         # Connect to database
         await self.data_loader.connect()
-        
-        # Load games
-        games = await self.data_loader.load_games()
-        
-        # Process into training format
-        states, policies, values = self.processor.process_games(games)
-        
-        # Split train/test
-        split_idx = int(len(states) * self.config.train_test_split)
-        train_states, test_states = states[:split_idx], states[split_idx:]
-        train_policies, test_policies = policies[:split_idx], policies[split_idx:]
-        train_values, test_values = values[:split_idx], values[split_idx:]
-        
-        # Create datasets
-        train_dataset = GameDataset(train_states, train_policies, train_values)
-        test_dataset = GameDataset(test_states, test_policies, test_values)
-        
+
+        # Buffers to accumulate examples before writing compressed shard files
+        train_buf_states = []
+        train_buf_policies = []
+        train_buf_values = []
+
+        test_buf_states = []
+        test_buf_policies = []
+        test_buf_values = []
+
+        train_shards: List[str] = []
+        test_shards: List[str] = []
+
+        shard_counter = {'train': 0, 'test': 0}
+
+        buffer_limit = max(self.config.batch_size * 200, 10000)
+
+        # Stream games from DB in batches and process incrementally
+        async for games_batch in self.data_loader.load_games(batch_size=1000, limit=None):
+            states, policies, values = self.processor.process_games(games_batch)
+            if len(states) == 0:
+                continue
+
+            for i in range(len(states)):
+                if random.random() < self.config.train_test_split:
+                    train_buf_states.append(states[i])
+                    train_buf_policies.append(int(policies[i]))
+                    train_buf_values.append(float(values[i]))
+                else:
+                    test_buf_states.append(states[i])
+                    test_buf_policies.append(int(policies[i]))
+                    test_buf_values.append(float(values[i]))
+
+            # Flush train buffer to shard
+            if len(train_buf_states) >= buffer_limit:
+                shard_path = os.path.join(self.config.checkpoint_dir, f'train_shard_{shard_counter["train"]}.npz')
+                np.savez_compressed(shard_path,
+                                    states=np.array(train_buf_states),
+                                    policies=np.array(train_buf_policies, dtype=np.int64),
+                                    values=np.array(train_buf_values, dtype=np.float32))
+                train_shards.append(shard_path)
+                shard_counter['train'] += 1
+                train_buf_states.clear(); train_buf_policies.clear(); train_buf_values.clear()
+
+            # Flush test buffer to shard
+            if len(test_buf_states) >= buffer_limit:
+                shard_path = os.path.join(self.config.checkpoint_dir, f'test_shard_{shard_counter["test"]}.npz')
+                np.savez_compressed(shard_path,
+                                    states=np.array(test_buf_states),
+                                    policies=np.array(test_buf_policies, dtype=np.int64),
+                                    values=np.array(test_buf_values, dtype=np.float32))
+                test_shards.append(shard_path)
+                shard_counter['test'] += 1
+                test_buf_states.clear(); test_buf_policies.clear(); test_buf_values.clear()
+
+        # Write remaining buffers
+        if train_buf_states:
+            shard_path = os.path.join(self.config.checkpoint_dir, f'train_shard_{shard_counter["train"]}.npz')
+            np.savez_compressed(shard_path,
+                                states=np.array(train_buf_states),
+                                policies=np.array(train_buf_policies, dtype=np.int64),
+                                values=np.array(train_buf_values, dtype=np.float32))
+            train_shards.append(shard_path)
+            shard_counter['train'] += 1
+            train_buf_states.clear(); train_buf_policies.clear(); train_buf_values.clear()
+
+        if test_buf_states:
+            shard_path = os.path.join(self.config.checkpoint_dir, f'test_shard_{shard_counter["test"]}.npz')
+            np.savez_compressed(shard_path,
+                                states=np.array(test_buf_states),
+                                policies=np.array(test_buf_policies, dtype=np.int64),
+                                values=np.array(test_buf_values, dtype=np.float32))
+            test_shards.append(shard_path)
+            shard_counter['test'] += 1
+            test_buf_states.clear(); test_buf_policies.clear(); test_buf_values.clear()
+
+        # Close DB pool
+        await self.data_loader.close()
+
+        if not train_shards:
+            raise RuntimeError("No training data produced — check database or parsing logic")
+
+        if not test_shards:
+            logger.warning("No test shards produced; using a small split of training data for validation")
+
+        # Create iterable datasets that read shards lazily
+        train_dataset = ShardedIterableDataset(train_shards)
+        test_dataset = ShardedIterableDataset(test_shards) if test_shards else ShardedIterableDataset(train_shards[:1])
+
         train_loader = torch.utils.data.DataLoader(
-            train_dataset, 
+            train_dataset,
             batch_size=self.config.batch_size,
-            shuffle=True
+            shuffle=False
         )
         test_loader = torch.utils.data.DataLoader(
             test_dataset,
-            batch_size=self.config.batch_size
+            batch_size=self.config.batch_size,
+            shuffle=False
         )
-        
+
         # Training loop
-        logger.info(f"Training for {self.config.epochs} epochs...")
+        logger.info(f"Training for {self.config.epochs} epochs (streamed shards)...")
         best_test_loss = float('inf')
-        
+
         for epoch in range(self.config.epochs):
             # Train
             train_policy_loss = 0.0
             train_value_loss = 0.0
-            
+            batches = 0
+
             for batch_states, batch_policies, batch_values in train_loader:
-                policy_loss, value_loss = self.trainer.train_on_batch(
-                    batch_states.numpy(),
-                    batch_policies.numpy(),
-                    batch_values.numpy()
-                )
+                # Ensure numpy arrays for trainer API
+                bs = batch_states.numpy() if hasattr(batch_states, 'numpy') else np.array(batch_states)
+                bp = batch_policies.numpy() if hasattr(batch_policies, 'numpy') else np.array(batch_policies)
+                bv = batch_values.numpy() if hasattr(batch_values, 'numpy') else np.array(batch_values)
+
+                policy_loss, value_loss = self.trainer.train_on_batch(bs, bp, bv)
                 train_policy_loss += policy_loss
                 train_value_loss += value_loss
-            
-            train_policy_loss /= len(train_loader)
-            train_value_loss /= len(train_loader)
-            
+                batches += 1
+
+            if batches:
+                train_policy_loss /= batches
+                train_value_loss /= batches
+            else:
+                train_policy_loss = 0.0
+                train_value_loss = 0.0
+
             # Evaluate on test set
             test_policy_loss, test_value_loss = self._evaluate(test_loader)
             test_total_loss = test_policy_loss + test_value_loss
-            
+
             logger.info(
                 f"Epoch {epoch + 1}/{self.config.epochs} - "
                 f"Train P/V Loss: {train_policy_loss:.4f}/{train_value_loss:.4f} - "
                 f"Test P/V Loss: {test_policy_loss:.4f}/{test_value_loss:.4f}"
             )
-            
+
             # Save checkpoint
             if (epoch + 1) % 10 == 0:
                 checkpoint_path = os.path.join(
@@ -463,14 +580,13 @@ class TrainingPipeline:
                 )
                 self.trainer.save_checkpoint(checkpoint_path)
                 logger.info(f"Saved checkpoint: {checkpoint_path}")
-            
+
             # Save best model
             if test_total_loss < best_test_loss:
                 best_test_loss = test_total_loss
                 best_path = os.path.join(self.config.checkpoint_dir, 'best_model.pt')
                 self.trainer.save_checkpoint(best_path)
-        
-        await self.data_loader.close()
+
         logger.info("Training complete")
     
     def _evaluate(self, test_loader) -> Tuple[float, float]:
@@ -478,11 +594,12 @@ class TrainingPipeline:
         self.model.eval()
         total_policy_loss = 0.0
         total_value_loss = 0.0
-        
+        count = 0
+
         with torch.no_grad():
             for batch_states, batch_policies, batch_values in test_loader:
                 policy_pred, value_pred = self.model(batch_states.to(self.trainer.device))
-                
+
                 policy_loss = torch.nn.functional.cross_entropy(
                     policy_pred,
                     batch_policies.to(self.trainer.device)
@@ -491,11 +608,14 @@ class TrainingPipeline:
                     value_pred.squeeze(),
                     batch_values.to(self.trainer.device)
                 )
-                
+
                 total_policy_loss += policy_loss.item()
                 total_value_loss += value_loss.item()
-        
-        return total_policy_loss / len(test_loader), total_value_loss / len(test_loader)
+                count += 1
+
+        if count == 0:
+            return 0.0, 0.0
+        return total_policy_loss / count, total_value_loss / count
     
     async def run_full_pipeline(self):
         """Run complete pipeline: generate data → train → evaluate."""

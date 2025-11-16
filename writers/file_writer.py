@@ -17,6 +17,16 @@ except Exception:
     pd = None
     _HAVE_PANDAS = False
 
+# Prefer pyarrow for parquet writes if available (lighter-weight than going through pandas)
+try:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    _HAVE_PYARROW = True
+except Exception:
+    pa = None
+    pq = None
+    _HAVE_PYARROW = False
+
 
 class FileWriter:
     """Simple file-backed JSONL writer with shard rotation.
@@ -48,9 +58,14 @@ class FileWriter:
         if prom_metrics:
             self._p_queue_length = prom_metrics.get('queue_length')
             self._p_games_saved = prom_metrics.get('games_saved')
+            # shard metrics
+            self._p_shards_written = prom_metrics.get('shards_written')
+            self._p_shard_bytes = prom_metrics.get('shard_bytes')
         else:
             self._p_queue_length = None
             self._p_games_saved = None
+            self._p_shards_written = None
+            self._p_shard_bytes = None
 
     async def initialize(self):
         os.makedirs(self.shard_dir, exist_ok=True)
@@ -88,7 +103,19 @@ class FileWriter:
             if self.shard_format == 'jsonl' and getattr(self, '_current_shard_file', None):
                 self._current_shard_file.flush()
                 self._current_shard_file.close()
-                logger.info("Closed shard %s (games=%d)", self._current_shard_path, self._current_shard_count)
+                # measure size and update shard metrics
+                try:
+                    size = os.path.getsize(self._current_shard_path)
+                except Exception:
+                    size = None
+                logger.info("Closed shard %s (games=%d) size=%s", self._current_shard_path, self._current_shard_count, size)
+                try:
+                    if self._p_shards_written:
+                        self._p_shards_written.inc()
+                    if self._p_shard_bytes and size is not None:
+                        self._p_shard_bytes.inc(size)
+                except Exception:
+                    pass
             elif self.shard_format == 'parquet' and self._parquet_buffer:
                 await self._flush_parquet_shard()
         except Exception:
@@ -111,25 +138,34 @@ class FileWriter:
                     await self._open_new_shard()
 
                 # optionally trim large state payloads (only drop state blobs; keep moves unless move mode says otherwise)
-                if getattr(self.config, 'trim_states', False):
+                if getattr(self.config, 'trim_states', True):
                     if isinstance(game, dict):
                         game = dict(game)
                         game.pop('state_before', None)
                         game.pop('state_after', None)
 
                 # handle move storage modes (only relevant for parquet mode)
-                move_mode = getattr(self.config, 'shard_move_mode', 'full')
+                move_mode = getattr(self.config, 'shard_move_mode', 'compressed')
 
                 if self.shard_format == 'jsonl':
                     # write json line
                     line = json.dumps(game, ensure_ascii=False)
                     self._current_shard_file.write(line + '\n')
                     self._current_shard_count += 1
+                    # try to account for bytes written for metrics
+                    try:
+                        b = len((line + '\n').encode('utf-8'))
+                        if self._p_games_saved:
+                            # games_saved already incremented below; track bytes separately via prom_metrics if provided
+                            pass
+                    except Exception:
+                        pass
                 else:
                     # parquet buffering
                     # normalize fields to simple types; handle moves according to mode
                     rec = dict(game)
                     rec['metadata'] = json.dumps(rec.get('metadata', {}))
+                    rec['initial_state'] = game.get('initial_state')
                     moves_val = rec.get('moves', [])
                     if move_mode == 'full':
                         # store moves as JSON string
@@ -166,6 +202,8 @@ class FileWriter:
                         self._p_games_saved.inc()
                 except Exception:
                     pass
+
+                # record shard-level metrics when writing parquet buffer (we'll increment bytes/shard at flush time)
 
                 # rotate if needed
                 if self._current_shard_count >= self.shard_games:
@@ -225,26 +263,132 @@ class FileWriter:
         path = os.path.join(self.shard_dir, filename)
         temp_path = path + ".tmp"
         try:
-            if _HAVE_PANDAS:
-                df = pd.DataFrame(self._parquet_buffer)
-                # ensure strings for nested JSON columns
-                if 'metadata' in df.columns:
-                    df['metadata'] = df['metadata'].astype(str)
-                if 'moves' in df.columns:
-                    df['moves'] = df['moves'].astype(str)
-                # write parquet to a temp file then atomically replace
-                df.to_parquet(temp_path, engine='pyarrow', compression='snappy')
-                os.replace(temp_path, path)
-                logger.info("Wrote parquet shard %s (rows=%d)", path, len(self._parquet_buffer))
+            # Prefer pyarrow Table -> parquet write (no pandas roundtrip)
+            if _HAVE_PYARROW:
+                # Build columnar dict: collect all keys
+                all_keys = set()
+                for r in self._parquet_buffer:
+                    all_keys.update(r.keys())
+
+                col_dict = {}
+                for k in sorted(all_keys):
+                    vals = []
+                    for r in self._parquet_buffer:
+                        v = r.get(k, None)
+                        # ensure metadata is a string
+                        if k == 'metadata' and v is not None and not isinstance(v, (str, bytes)):
+                            try:
+                                v = json.dumps(v)
+                            except Exception:
+                                v = str(v)
+                        # moves might be bytes (compressed) or string; leave bytes alone
+                        if k == 'moves' and isinstance(v, memoryview):
+                            # convert memoryview to bytes
+                            v = bytes(v)
+                        vals.append(v)
+                    col_dict[k] = vals
+
+                # create a pyarrow Table and write parquet with snappy
+                try:
+                    table = pa.Table.from_pydict(col_dict)
+                    pq.write_table(table, temp_path, compression='snappy')
+                    try:
+                        size = os.path.getsize(temp_path)
+                    except Exception:
+                        size = None
+                    os.replace(temp_path, path)
+                    logger.info("Wrote parquet shard %s (rows=%d) size=%s", path, len(self._parquet_buffer), size)
+                    try:
+                        if self._p_shards_written:
+                            self._p_shards_written.inc()
+                        if self._p_shard_bytes and size is not None:
+                            self._p_shard_bytes.inc(size)
+                    except Exception:
+                        pass
+                except Exception:
+                    # fallback to pandas if pyarrow write fails
+                    if _HAVE_PANDAS:
+                        df = pd.DataFrame(self._parquet_buffer)
+                        if 'metadata' in df.columns:
+                            df['metadata'] = df['metadata'].astype(str)
+                        if 'moves' in df.columns:
+                            # if moves are bytes, convert to Python bytes -> pandas handles as object
+                            df['moves'] = df['moves'].apply(lambda x: x if isinstance(x, (bytes, type(None))) else str(x))
+                        df.to_parquet(temp_path, engine='pyarrow', compression='snappy')
+                        try:
+                            size = os.path.getsize(temp_path)
+                        except Exception:
+                            size = None
+                        os.replace(temp_path, path)
+                        logger.info("Wrote parquet shard %s via pandas fallback (rows=%d) size=%s", path, len(self._parquet_buffer), size)
+                        try:
+                            if self._p_shards_written:
+                                self._p_shards_written.inc()
+                            if self._p_shard_bytes and size is not None:
+                                self._p_shard_bytes.inc(size)
+                        except Exception:
+                            pass
+                    else:
+                        # fallback: write JSONL to unique file
+                        json_path = path.replace('.parquet', '.jsonl')
+                        temp_json = json_path + ".tmp"
+                        with open(temp_json, 'a', encoding='utf-8') as f:
+                            for rec in self._parquet_buffer:
+                                f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+                        try:
+                            size = os.path.getsize(temp_json)
+                        except Exception:
+                            size = None
+                        os.replace(temp_json, json_path)
+                        logger.warning("PyArrow and pandas not available, wrote fallback JSONL shard for %s size=%s", json_path, size)
+                        try:
+                            if self._p_shards_written:
+                                self._p_shards_written.inc()
+                            if self._p_shard_bytes and size is not None:
+                                self._p_shard_bytes.inc(size)
+                        except Exception:
+                            pass
             else:
-                # fallback: write JSONL to unique file
-                json_path = path.replace('.parquet', '.jsonl')
-                temp_json = json_path + ".tmp"
-                with open(temp_json, 'a', encoding='utf-8') as f:
-                    for rec in self._parquet_buffer:
-                        f.write(json.dumps(rec, ensure_ascii=False) + '\n')
-                os.replace(temp_json, json_path)
-                logger.warning("Pandas not available, wrote fallback JSONL shard for %s", json_path)
+                # pyarrow not available; try pandas path then JSONL fallback
+                if _HAVE_PANDAS:
+                    df = pd.DataFrame(self._parquet_buffer)
+                    if 'metadata' in df.columns:
+                        df['metadata'] = df['metadata'].astype(str)
+                    if 'moves' in df.columns:
+                        df['moves'] = df['moves'].apply(lambda x: x if isinstance(x, (bytes, type(None))) else str(x))
+                    df.to_parquet(temp_path, engine='pyarrow', compression='snappy')
+                    try:
+                        size = os.path.getsize(temp_path)
+                    except Exception:
+                        size = None
+                    os.replace(temp_path, path)
+                    logger.info("Wrote parquet shard %s (rows=%d) size=%s", path, len(self._parquet_buffer), size)
+                    try:
+                        if self._p_shards_written:
+                            self._p_shards_written.inc()
+                        if self._p_shard_bytes and size is not None:
+                            self._p_shard_bytes.inc(size)
+                    except Exception:
+                        pass
+                else:
+                    json_path = path.replace('.parquet', '.jsonl')
+                    temp_json = json_path + ".tmp"
+                    with open(temp_json, 'a', encoding='utf-8') as f:
+                        for rec in self._parquet_buffer:
+                            f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+                    try:
+                        size = os.path.getsize(temp_json)
+                    except Exception:
+                        size = None
+                    os.replace(temp_json, json_path)
+                    logger.warning("Pandas not available, wrote fallback JSONL shard for %s size=%s", json_path, size)
+                    try:
+                        if self._p_shards_written:
+                            self._p_shards_written.inc()
+                        if self._p_shard_bytes and size is not None:
+                            self._p_shard_bytes.inc(size)
+                    except Exception:
+                        pass
         except Exception:
             logger.exception("Failed to flush parquet shard %s", path)
         finally:

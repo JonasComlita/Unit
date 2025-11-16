@@ -1,0 +1,18 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Unit Self-Play: Extended Metrics",
+    "tags": ["selfplay"],
+    "timezone": "browser",
+    "panels": [
+      { "type": "stat", "title": "Games generated total", "targets": [ { "expr": "unit_games_generated_total" } ], "gridPos": { "x": 0, "y": 0, "w": 8, "h": 4 } },
+      { "type": "stat", "title": "Games saved total", "targets": [ { "expr": "unit_games_saved_total" } ], "gridPos": { "x": 8, "y": 0, "w": 8, "h": 4 } },
+      { "type": "graph", "title": "Write Queue Length", "targets": [ { "expr": "unit_write_queue_length" } ], "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 } },
+      { "type": "graph", "title": "DB Write Latency (s)", "targets": [ { "expr": "histogram_quantile(0.99, sum(rate(unit_db_write_latency_seconds_bucket[5m])) by (le))" } ], "gridPos": { "x": 12, "y": 4, "w": 12, "h": 6 } },
+      { "type": "stat", "title": "Shards written (total)", "targets": [ { "expr": "unit_shards_written_total" } ], "gridPos": { "x": 0, "y": 10, "w": 6, "h": 4 } },
+      { "type": "stat", "title": "Shard bytes (total)", "targets": [ { "expr": "unit_shard_bytes_total" } ], "gridPos": { "x": 6, "y": 10, "w": 6, "h": 4 } },
+      { "type": "stat", "title": "S3 uploads (success)", "targets": [ { "expr": "unit_s3_uploads_total" } ], "gridPos": { "x": 12, "y": 10, "w": 6, "h": 4 } },
+      { "type": "stat", "title": "S3 upload errors", "targets": [ { "expr": "unit_s3_upload_errors_total" } ], "gridPos": { "x": 18, "y": 10, "w": 6, "h": 4 } }
+    ]
+  }
+}

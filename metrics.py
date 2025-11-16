@@ -63,6 +63,12 @@ def create_metrics(registry: Optional[object]):
         'game_errors': Counter('unit_game_errors_total', 'Game generation errors', **kwargs),
         'queue_length': Gauge('unit_write_queue_length', 'Current write queue length', **kwargs),
         'db_latency': Histogram('unit_db_write_latency_seconds', 'DB write latency seconds', **kwargs),
+        # Shard/file metrics
+        'shards_written': Counter('unit_shards_written_total', 'Local shard files written', **kwargs),
+        'shard_bytes': Counter('unit_shard_bytes_total', 'Total bytes written to shard files', **kwargs),
+        # S3 uploader metrics
+        's3_uploads': Counter('unit_s3_uploads_total', 'Successful S3 uploads', **kwargs),
+        's3_upload_errors': Counter('unit_s3_upload_errors_total', 'Failed S3 uploads', **kwargs),
     }
 
     return metrics

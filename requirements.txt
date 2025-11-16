@@ -11,7 +11,11 @@ prometheus-client==0.17.1
 # For dataset export to Parquet
 pandas==2.2.3
 pyarrow==12.0.1
+# Compact serialization/compression
+msgpack==1.0.5
+zstandard==0.21.0
 # Environment and dev tooling
 python-dotenv==1.0.0
 alembic==1.11.1
 flake8==6.1.0
+boto3==1.28.78
