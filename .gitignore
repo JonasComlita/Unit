@@ -8,3 +8,6 @@ coverage/
 .vscode/
 .idea/
 serve.sh
+.venv311
+__pycache__/
+.pytest_cache/

@@ -1,0 +1,10 @@
+# Core dependencies
+asyncpg==0.29.0
+numpy==1.24.3
+
+# Testing
+pytest==7.4.0
+pytest-asyncio==0.21.1
+
+# Optional: for production monitoring
+prometheus-client==0.17.1

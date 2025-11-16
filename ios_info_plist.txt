@@ -1,0 +1,34 @@
+<!-- Add these keys to ios/App/App/Info.plist -->
+
+<!-- Require landscape orientation for better gameplay -->
+<key>UISupportedInterfaceOrientations</key>
+<array>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+</array>
+
+<!-- iPad orientations -->
+<key>UISupportedInterfaceOrientations~ipad</key>
+<array>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+    <string>UIInterfaceOrientationPortrait</string>
+</array>
+
+<!-- Hide status bar for immersive experience -->
+<key>UIStatusBarHidden</key>
+<true/>
+<key>UIViewControllerBasedStatusBarAppearance</key>
+<false/>
+
+<!-- Prevent device from sleeping during gameplay -->
+<key>UIRequiresPersistentWiFi</key>
+<false/>
+
+<!-- App Display Name -->
+<key>CFBundleDisplayName</key>
+<string>Unit Strategy</string>
+
+<!-- Minimum iOS Version -->
+<key>MinimumOSVersion</key>
+<string>13.0</string>
