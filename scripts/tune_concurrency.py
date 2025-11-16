@@ -58,6 +58,8 @@ def main():
     parser.add_argument('--db-writers', type=int, default=None, help='Number of DB writer workers to use')
     parser.add_argument('--db-pool-min', type=int, default=None, help='DB pool min size')
     parser.add_argument('--db-pool-max', type=int, default=None, help='DB pool max size')
+    parser.add_argument('--enable-batching', action='store_true', help='Enable batched DB writes')
+    parser.add_argument('--batch-games', type=int, default=None, help='Batch size for batched DB writes')
     args = parser.parse_args()
 
     results = []
@@ -73,6 +75,8 @@ def main():
                     run_trial.db_writer_workers = args.db_writers
                     run_trial.db_pool_min = args.db_pool_min
                     run_trial.db_pool_max = args.db_pool_max
+                    run_trial.enable_batching = args.enable_batching
+                    run_trial.batch_games = args.batch_games
 
                     elapsed, generated = asyncio.run(run_trial(c, g))
                     rate = generated / elapsed if elapsed > 0 else 0

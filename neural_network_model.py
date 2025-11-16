@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 class UnitGameNet(nn.Module):
     """
@@ -113,11 +113,25 @@ class ResidualBlock(nn.Module):
 class UnitGameTrainer:
     """Training loop for the neural network"""
     
-    def __init__(self, model: UnitGameNet, learning_rate: float = 0.001):
+    def __init__(self, model: UnitGameNet, learning_rate: float = 0.001, device: Optional[str] = None, use_amp: bool = False):
+        """Create a trainer.
+
+        Args:
+            model: UnitGameNet instance
+            learning_rate: optimizer lr
+            device: device string e.g. 'cuda', 'cuda:0' or 'cpu'. If None, auto-selects CUDA when available.
+            use_amp: enable torch.cuda.amp mixed precision for training (only used when CUDA is available)
+        """
         self.model = model
         self.optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device)
+        self.use_amp = use_amp and torch.cuda.is_available()
         self.model.to(self.device)
+        # GradScaler only needed when using AMP and CUDA
+        self._scaler = torch.cuda.amp.GradScaler() if self.use_amp else None
     
     def train_on_batch(self, 
                       states: np.ndarray, 
@@ -135,28 +149,35 @@ class UnitGameTrainer:
             policy_loss, value_loss
         """
         self.model.train()
-        
+
         # Convert to tensors
-        states = torch.FloatTensor(states).to(self.device)
-        policy_targets = torch.FloatTensor(policy_targets).to(self.device)
-        value_targets = torch.FloatTensor(value_targets).to(self.device)
-        
-        # Forward pass
-        policy_pred, value_pred = self.model(states)
-        
-        # Calculate losses
-        policy_loss = F.cross_entropy(policy_pred, policy_targets)
-        value_loss = F.mse_loss(value_pred.squeeze(), value_targets)
-        
-        # Combined loss
-        total_loss = policy_loss + value_loss
-        
-        # Backward pass
+        states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
+        # policy targets are class indices for cross-entropy loss
+        policy_targets = torch.as_tensor(policy_targets, dtype=torch.long, device=self.device)
+        value_targets = torch.as_tensor(value_targets, dtype=torch.float32, device=self.device)
+
+        # Training with optional AMP
         self.optimizer.zero_grad()
-        total_loss.backward()
-        self.optimizer.step()
-        
-        return policy_loss.item(), value_loss.item()
+        if self.use_amp:
+            with torch.cuda.amp.autocast():
+                policy_pred, value_pred = self.model(states)
+                policy_loss = F.cross_entropy(policy_pred, policy_targets)
+                value_loss = F.mse_loss(value_pred.squeeze(), value_targets)
+                total_loss = policy_loss + value_loss
+
+            # scale gradients
+            self._scaler.scale(total_loss).backward()
+            self._scaler.step(self.optimizer)
+            self._scaler.update()
+        else:
+            policy_pred, value_pred = self.model(states)
+            policy_loss = F.cross_entropy(policy_pred, policy_targets)
+            value_loss = F.mse_loss(value_pred.squeeze(), value_targets)
+            total_loss = policy_loss + value_loss
+            total_loss.backward()
+            self.optimizer.step()
+
+        return float(policy_loss.item()), float(value_loss.item())
     
     def save_checkpoint(self, filepath: str):
         """Save model checkpoint"""

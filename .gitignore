@@ -45,3 +45,6 @@ data/splits/
 
 # Misc
 .python-version
+.github/
+shards/
+shards*

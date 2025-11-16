@@ -78,6 +78,26 @@ class SelfPlayConfig:
     shutdown_grace_period: float = 5.0
     # Maximum backoff cap for DB retries (seconds)
     db_retry_backoff_cap: float = 30.0
+    # Batch write options: when enabled, writer workers will attempt to write
+    # multiple games in a single DB transaction to reduce per-game overhead.
+    enable_batch_writes: bool = False
+    batch_games: int = 25
+    batch_timeout: float = 0.5
+    # File writer options (JSONL shards)
+    file_writer_enabled: bool = False
+    shard_dir: str = 'shards'
+    shard_games: int = 1000
+    # whether to compress shards (not implemented yet)
+    shard_compress: bool = False
+    # shard_format: 'jsonl' or 'parquet'
+    shard_format: str = 'jsonl'
+    # Trim large state blobs (state_before/state_after) when writing shards.
+    # Set to True to reduce shard size for production training data exports.
+    trim_states: bool = False
+    # How to store moves in shards: 'full' (store complete moves array),
+    # 'compressed' (gzip-compress moves JSON into a binary column),
+    # or 'compact' (store a reduced representation - not implemented here).
+    shard_move_mode: str = 'full'
 
 
 @dataclass
@@ -231,18 +251,54 @@ class DatabaseWriter:
         
         while not self.shutdown_event.is_set() or not self.write_queue.empty():
             try:
-                # Wait for game with timeout to allow shutdown checks
-                game = await asyncio.wait_for(
-                    self.write_queue.get(),
-                    timeout=1.0
-                )
-                await self._save_game_with_retry(game)
-                self.write_queue.task_done()
-                try:
-                    if getattr(self, '_p_queue_length', None):
-                        self._p_queue_length.set(self.write_queue.qsize())
-                except Exception:
-                    pass
+                if getattr(self.config, 'enable_batch_writes', False):
+                    # Attempt to gather a batch of games
+                    batch = []
+                    try:
+                        first = await asyncio.wait_for(self.write_queue.get(), timeout=1.0)
+                        batch.append(first)
+                    except asyncio.TimeoutError:
+                        # nothing to do right now
+                        continue
+
+                    # Try to quickly drain up to batch size without waiting long
+                    batch_size = max(1, int(getattr(self.config, 'batch_games', 25)))
+                    batch_deadline = time.time() + float(getattr(self.config, 'batch_timeout', 0.5))
+
+                    while len(batch) < batch_size and time.time() < batch_deadline:
+                        try:
+                            item = self.write_queue.get_nowait()
+                            batch.append(item)
+                        except asyncio.QueueEmpty:
+                            # give a tiny sleep to allow quick arrivals
+                            await asyncio.sleep(0)
+                            break
+
+                    # Save the batch with retry semantics
+                    await self._save_games_with_retry(batch)
+
+                    # mark done for all items
+                    for _ in batch:
+                        try:
+                            self.write_queue.task_done()
+                        except Exception:
+                            pass
+
+                    try:
+                        if getattr(self, '_p_queue_length', None):
+                            self._p_queue_length.set(self.write_queue.qsize())
+                    except Exception:
+                        pass
+                else:
+                    # Non-batched path (legacy)
+                    game = await asyncio.wait_for(self.write_queue.get(), timeout=1.0)
+                    await self._save_game_with_retry(game)
+                    self.write_queue.task_done()
+                    try:
+                        if getattr(self, '_p_queue_length', None):
+                            self._p_queue_length.set(self.write_queue.qsize())
+                    except Exception:
+                        pass
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
@@ -414,6 +470,135 @@ class DatabaseWriter:
             # Perform operations using the plain connection object.
             await _perform_ops(conn)
 
+    async def _save_games_with_retry(self, games: List[Dict[str, Any]]):
+        """Save multiple games in a single transaction with retry logic."""
+        retry_count = 0
+        last_error = None
+
+        while retry_count < self.config.db_retry_attempts:
+            try:
+                db_latency = getattr(self, '_p_db_latency', None)
+                if db_latency:
+                    with db_latency.time():
+                        await self._save_games_to_db(games)
+                else:
+                    await self._save_games_to_db(games)
+
+                # update metrics for all games in the batch
+                self.metrics.games_saved += len(games)
+                try:
+                    if getattr(self, '_p_games_saved', None):
+                        for _ in range(len(games)):
+                            self._p_games_saved.inc()
+                except Exception:
+                    pass
+                return
+            except Exception as e:
+                last_error = e
+                retry_count += 1
+                self.metrics.db_errors += 1
+                try:
+                    if getattr(self, '_p_db_errors', None):
+                        self._p_db_errors.inc()
+                except Exception:
+                    pass
+
+                if retry_count < self.config.db_retry_attempts:
+                    base = self.config.db_retry_delay * (2 ** (retry_count - 1))
+                    delay = min(self.config.db_retry_backoff_cap, base)
+                    jitter = random.uniform(0, min(0.2 * delay, 1.0))
+                    delay += jitter
+                    logger.warning(
+                        f"DB batch write failed (attempt {retry_count}), retrying in {delay:.2f}s: {e}"
+                    )
+                    await asyncio.sleep(delay)
+
+        logger.error(f"Failed to save batch of {len(games)} games after {retry_count} attempts: {last_error}")
+
+    async def _save_games_to_db(self, games: List[Dict[str, Any]]):
+        """Perform batched save of games and moves inside a single transaction."""
+        if not self.pool:
+            raise RuntimeError("Database pool not initialized")
+
+        acquire_candidate = self.pool.acquire()
+
+        async def _perform_ops(conn):
+            async with conn.transaction():
+                # Prepare game records
+                game_records = [(
+                    g['game_id'],
+                    int(g.get('start_time') or int(time.time() * 1000)),
+                    int(g.get('end_time') or int(time.time() * 1000)),
+                    g.get('winner'),
+                    g.get('total_moves'),
+                    'selfplay'
+                ) for g in games]
+
+                if game_records:
+                    await conn.executemany(
+                        """
+                        INSERT INTO games (
+                            game_id, start_time, end_time, winner, 
+                            total_moves, platform
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6)
+                        ON CONFLICT (game_id) DO NOTHING
+                        """,
+                        game_records
+                    )
+
+                # Metadata inserts (best-effort)
+                for g in games:
+                    metadata = g.get('metadata')
+                    if metadata is not None:
+                        try:
+                            await conn.execute(
+                                """
+                                INSERT INTO game_metadata (game_id, metadata)
+                                VALUES ($1, $2)
+                                ON CONFLICT (game_id) DO UPDATE SET metadata = EXCLUDED.metadata
+                                """,
+                                g['game_id'],
+                                json.dumps(metadata)
+                            )
+                        except Exception:
+                            logger.debug("Failed to save metadata for game %s", g['game_id'], exc_info=True)
+
+                # Batch moves - flatten moves across all games
+                move_records = []
+                now_ts = int(time.time() * 1000)
+                for g in games:
+                    for move in g.get('moves', []):
+                        move_records.append((
+                            g['game_id'],
+                            move.get('move_number'),
+                            move.get('player'),
+                            (move.get('action') or {}).get('type'),
+                            json.dumps(move.get('action', {})),
+                            move.get('thinking_time_ms', 0),
+                            int(move.get('timestamp') or now_ts)
+                        ))
+
+                if move_records:
+                    await conn.executemany(
+                        """
+                        INSERT INTO moves (
+                            game_id, move_number, player_id, action_type,
+                            action_data, thinking_time_ms, timestamp
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        move_records
+                    )
+
+        if hasattr(acquire_candidate, '__aenter__'):
+            async with acquire_candidate as conn:
+                await _perform_ops(conn)
+        else:
+            conn = await acquire_candidate
+            await _perform_ops(conn)
+
     async def enqueue_game(self, game: Dict[str, Any]):
         """Add game to write queue."""
         if self.config.dry_run:
@@ -500,7 +685,17 @@ class SelfPlayGenerator:
         except Exception:
             prom_metrics = None
 
-        self.db_writer = DatabaseWriter(config, self.metrics, prom_metrics=prom_metrics)
+        # Prefer a file-backed writer when enabled; otherwise use DB writer.
+        if getattr(self.config, 'file_writer_enabled', False):
+            try:
+                # Local import so scripts that don't have writers/ dir won't break.
+                from writers.file_writer import FileWriter
+                self.db_writer = FileWriter(config, self.metrics, prom_metrics=prom_metrics)
+            except Exception:
+                logger.exception("Failed to initialize FileWriter; falling back to DatabaseWriter")
+                self.db_writer = DatabaseWriter(config, self.metrics, prom_metrics=prom_metrics)
+        else:
+            self.db_writer = DatabaseWriter(config, self.metrics, prom_metrics=prom_metrics)
         self.shutdown_requested = False
 
         # Set log level
