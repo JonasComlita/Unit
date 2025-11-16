@@ -8,11 +8,13 @@ This module generates game training data asynchronously with:
 - CLI configuration
 - Structured logging and metrics
 - Comprehensive error handling
+
 """
 
 import asyncio
 import json
 import logging
+import random
 import os
 import signal
 import sys
@@ -25,6 +27,12 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 import numpy as np
 from asyncpg.pool import Pool
+from metrics import get_registry_and_start, create_metrics
+try:
+    from prometheus_client import Counter, Gauge, Histogram, start_http_server
+    PROMETHEUS_AVAILABLE = True
+except Exception:
+    PROMETHEUS_AVAILABLE = False
 
 # Configure structured logging
 logging.basicConfig(
@@ -55,9 +63,21 @@ class SelfPlayConfig:
     dry_run: bool = False
     batch_only: bool = False
     log_level: str = 'INFO'
+    random_start: bool = False
+    temperature: float = 1.0
+    metrics_port: Optional[int] = None
+    # Number of concurrent async writer workers consuming the write queue.
+    # Increasing this allows parallel DB writes (must be balanced with pool size).
+    db_writer_workers: int = 4
     # Max size for the in-memory write queue (provide backpressure).
     # Set to a large number by default so tests and local runs don't block.
     write_queue_maxsize: int = 1000
+    # Timeout when trying to enqueue a game before considering it dropped (seconds)
+    enqueue_timeout: float = 0.5
+    # How long to wait for writer to drain on shutdown before forcing a flush (seconds)
+    shutdown_grace_period: float = 5.0
+    # Maximum backoff cap for DB retries (seconds)
+    db_retry_backoff_cap: float = 30.0
 
 
 @dataclass
@@ -85,7 +105,7 @@ class Metrics:
 class DatabaseWriter:
     """Handles asynchronous database operations with connection pooling."""
 
-    def __init__(self, config: SelfPlayConfig, metrics: Metrics):
+    def __init__(self, config: SelfPlayConfig, metrics: Metrics, prom_metrics: Optional[dict] = None):
         self.config = config
         self.metrics = metrics
         self.pool: Optional[Pool] = None
@@ -93,8 +113,30 @@ class DatabaseWriter:
         maxsize = getattr(self.config, 'write_queue_maxsize', 0) or 0
         # asyncio.Queue treats 0 as infinite, so pass maxsize directly.
         self.write_queue: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
+        # support multiple concurrent writer tasks for higher write throughput
+        self.writer_tasks: List[asyncio.Task] = []
+        # backward-compatible single-task reference used by some tests
         self.writer_task: Optional[asyncio.Task] = None
         self.shutdown_event = asyncio.Event()
+        # internal flag to stop accepting new enqueues during shutdown
+        self._accepting = True
+
+        # Prometheus metrics: if a dict of pre-created metric objects is supplied
+        # (via `prom_metrics`), bind to those. Otherwise metric ops are no-ops.
+        if prom_metrics:
+            self._p_games_generated = prom_metrics.get('games_generated')
+            self._p_games_saved = prom_metrics.get('games_saved')
+            self._p_db_errors = prom_metrics.get('db_errors')
+            self._p_game_errors = prom_metrics.get('game_errors')
+            self._p_queue_length = prom_metrics.get('queue_length')
+            self._p_db_latency = prom_metrics.get('db_latency')
+        else:
+            self._p_games_generated = None
+            self._p_games_saved = None
+            self._p_db_errors = None
+            self._p_game_errors = None
+            self._p_queue_length = None
+            self._p_db_latency = None
 
     async def initialize(self):
         """Initialize database connection pool."""
@@ -128,6 +170,32 @@ class DatabaseWriter:
                     f"Database pool initialized (min={self.config.db_pool_min_size}, "
                     f"max={self.config.db_pool_max_size})"
                 )
+                # Ensure metadata table exists (lightweight, non-destructive)
+                try:
+                    # Some pool mocks may not support async context manager; handle both.
+                    acquire_candidate = self.pool.acquire()
+
+                    async def _create_metadata_table(conn):
+                        await conn.execute(
+                            """
+                            CREATE TABLE IF NOT EXISTS game_metadata (
+                                game_id VARCHAR(50) PRIMARY KEY REFERENCES games(game_id),
+                                metadata JSONB,
+                                created_at TIMESTAMP DEFAULT NOW()
+                            )
+                            """
+                        )
+
+                    if hasattr(acquire_candidate, '__aenter__'):
+                        async with acquire_candidate as conn:
+                            await _create_metadata_table(conn)
+                    else:
+                        conn = await acquire_candidate
+                        await _create_metadata_table(conn)
+                except Exception:
+                    # Non-fatal: metadata table creation failure shouldn't stop initialization.
+                    logger.debug("Could not ensure game_metadata table exists (continuing)", exc_info=True)
+
                 return
             except Exception as e:
                 last_error = e
@@ -148,12 +216,14 @@ class DatabaseWriter:
         if self.config.dry_run:
             logger.info("Dry run mode - writer not started")
             return
-        if self.writer_task and not self.writer_task.done():
-            logger.debug("Writer already running")
+        # If workers already running, skip
+        if any(not t.done() for t in self.writer_tasks):
+            logger.debug("Writer workers already running")
             return
 
-        self.writer_task = asyncio.create_task(self._writer_worker())
-        logger.info("Database writer worker started")
+        workers = max(1, int(getattr(self.config, 'db_writer_workers', 1)))
+        self.writer_tasks = [asyncio.create_task(self._writer_worker()) for _ in range(workers)]
+        logger.info(f"Database writer workers started (count={workers})")
 
     async def _writer_worker(self):
         """Worker that consumes games from queue and writes to database."""
@@ -168,13 +238,46 @@ class DatabaseWriter:
                 )
                 await self._save_game_with_retry(game)
                 self.write_queue.task_done()
+                try:
+                    if getattr(self, '_p_queue_length', None):
+                        self._p_queue_length.set(self.write_queue.qsize())
+                except Exception:
+                    pass
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
                 logger.error(f"Writer worker error: {e}", exc_info=True)
                 self.metrics.db_errors += 1
+                try:
+                    if getattr(self, '_p_db_errors', None):
+                        self._p_db_errors.inc()
+                except Exception:
+                    pass
 
         logger.info("Writer worker shutting down")
+
+    async def _force_drain_queue(self):
+        """Synchronous drain: try to write remaining items directly to DB.
+
+        This is used as a last-resort during shutdown if the writer didn't
+        finish within the grace period. It attempts best-effort writes and
+        logs failures without raising.
+        """
+        logger.info("Force-draining write queue (%d items)...", self.write_queue.qsize())
+        while not self.write_queue.empty():
+            try:
+                game = self.write_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            try:
+                await self._save_game_with_retry(game)
+            except Exception as e:
+                logger.exception("Failed to force-write game %s: %s", game.get('game_id'), e)
+            finally:
+                try:
+                    self.write_queue.task_done()
+                except Exception:
+                    pass
 
     async def _save_game_with_retry(self, game: Dict[str, Any]):
         """Save game to database with retry logic."""
@@ -183,19 +286,39 @@ class DatabaseWriter:
 
         while retry_count < self.config.db_retry_attempts:
             try:
-                await self._save_game_to_db(game)
+                # measure DB latency via histogram if available
+                db_latency = getattr(self, '_p_db_latency', None)
+                if db_latency:
+                    with db_latency.time():
+                        await self._save_game_to_db(game)
+                else:
+                    await self._save_game_to_db(game)
                 self.metrics.games_saved += 1
+                try:
+                    if getattr(self, '_p_games_saved', None):
+                        self._p_games_saved.inc()
+                except Exception:
+                    pass
                 return
             except Exception as e:
                 last_error = e
                 retry_count += 1
                 self.metrics.db_errors += 1
+                try:
+                    if getattr(self, '_p_db_errors', None):
+                        self._p_db_errors.inc()
+                except Exception:
+                    pass
                 
                 if retry_count < self.config.db_retry_attempts:
-                    delay = self.config.db_retry_delay * (2 ** (retry_count - 1))
+                    # Exponential backoff with a small jitter to avoid thundering herd
+                    base = self.config.db_retry_delay * (2 ** (retry_count - 1))
+                    delay = min(self.config.db_retry_backoff_cap, base)
+                    jitter = random.uniform(0, min(0.2 * delay, 1.0))
+                    delay += jitter
                     logger.warning(
                         f"DB write failed (attempt {retry_count}), "
-                        f"retrying in {delay}s: {e}"
+                        f"retrying in {delay:.2f}s: {e}"
                     )
                     await asyncio.sleep(delay)
 
@@ -235,6 +358,23 @@ class DatabaseWriter:
                     game.get('total_moves'),
                     'selfplay'
                 )
+
+                # Save game metadata if present and metadata table exists
+                metadata = game.get('metadata')
+                if metadata is not None:
+                    try:
+                        await conn.execute(
+                            """
+                            INSERT INTO game_metadata (game_id, metadata)
+                            VALUES ($1, $2)
+                            ON CONFLICT (game_id) DO UPDATE SET metadata = EXCLUDED.metadata
+                            """,
+                            game['game_id'],
+                            json.dumps(metadata)
+                        )
+                    except Exception:
+                        # Don't fail game save just because metadata couldn't be saved
+                        logger.debug("Failed to save metadata for game %s", game['game_id'], exc_info=True)
 
                 # Batch insert moves
                 now_ts = int(time.time() * 1000)
@@ -279,26 +419,62 @@ class DatabaseWriter:
         if self.config.dry_run:
             logger.debug(f"[DRY RUN] Would save game: {game['game_id']}")
             return
+        if not self._accepting:
+            logger.debug("Writer not accepting new games (shutting down); dropping %s", game.get('game_id'))
+            self.metrics.db_errors += 1
+            return
         try:
-            # Provide short backpressure window; if the queue is full we wait briefly.
-            await asyncio.wait_for(self.write_queue.put(game), timeout=2.0)
+            # Provide short backpressure window; if the queue is full we wait up to configured timeout.
+            await asyncio.wait_for(self.write_queue.put(game), timeout=getattr(self.config, 'enqueue_timeout', 2.0))
+            try:
+                if getattr(self, '_p_queue_length', None):
+                    self._p_queue_length.set(self.write_queue.qsize())
+            except Exception:
+                pass
         except asyncio.TimeoutError:
             # Queue is full and cannot accept new items quickly — drop and log.
             logger.warning(
                 f"Write queue full, dropping game {game.get('game_id')} to avoid blocking"
             )
             self.metrics.db_errors += 1
+            try:
+                if getattr(self, '_p_db_errors', None):
+                    self._p_db_errors.inc()
+            except Exception:
+                pass
 
     async def shutdown(self):
         """Gracefully shutdown writer and close pool."""
         logger.info("Shutting down database writer...")
+        # Stop accepting new enqueues
+        self._accepting = False
         self.shutdown_event.set()
 
-        if self.writer_task:
-            # Wait for queue to drain
-            await self.write_queue.join()
-            await self.writer_task
-            logger.info("Writer worker stopped")
+        if self.writer_tasks:
+            # Wait for queue to drain with a grace period; if it doesn't finish
+            # within the grace period, attempt a force-drain.
+            try:
+                await asyncio.wait_for(self.write_queue.join(), timeout=self.config.shutdown_grace_period)
+            except asyncio.TimeoutError:
+                logger.warning("Writer did not drain within %s seconds, force-draining remaining items", self.config.shutdown_grace_period)
+                try:
+                    await self._force_drain_queue()
+                except Exception:
+                    logger.exception("Error during forced drain")
+
+            # Wait for workers to finish
+            for task in self.writer_tasks:
+                try:
+                    await asyncio.wait_for(task, timeout=10.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Writer task did not exit promptly after drain; cancelling")
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+            logger.info("Writer workers stopped")
 
         if self.pool:
             await self.pool.close()
@@ -311,11 +487,25 @@ class SelfPlayGenerator:
     def __init__(self, config: SelfPlayConfig):
         self.config = config
         self.metrics = Metrics()
-        self.db_writer = DatabaseWriter(config, self.metrics)
+        # Initialize prometheus registry and metrics objects.
+        reg = None
+        try:
+            reg = get_registry_and_start(getattr(self.config, 'metrics_port', None))
+        except Exception:
+            reg = None
+
+        prom_metrics = None
+        try:
+            prom_metrics = create_metrics(reg)
+        except Exception:
+            prom_metrics = None
+
+        self.db_writer = DatabaseWriter(config, self.metrics, prom_metrics=prom_metrics)
         self.shutdown_requested = False
 
         # Set log level
         logging.getLogger().setLevel(getattr(logging, config.log_level.upper()))
+        # Note: HTTP server is started by get_registry_and_start above when a port is provided.
 
     async def initialize(self):
         """Initialize generator and database."""
@@ -404,6 +594,13 @@ class SelfPlayGenerator:
             f"P2 wins: {p2_wins} ({p2_wins/len(games)*100:.1f}%), "
             f"Draws: {draws}"
         )
+        # Starting player distribution if metadata available
+        starts = [g.get('metadata', {}).get('starting_player', 'UNKNOWN') for g in games]
+        if any(s != 'UNKNOWN' for s in starts):
+            from collections import Counter
+            c = Counter(starts)
+            parts = [f"{k}:{v}" for k, v in c.items()]
+            logger.info(f"Starting player distribution: {', '.join(parts)}")
 
     async def play_single_game(self, game_id: int) -> Dict[str, Any]:
         """
@@ -418,6 +615,15 @@ class SelfPlayGenerator:
         # Record start timestamp for the game (ms)
         start_ms = int(time.time() * 1000)
         game_state = self.initialize_game()
+
+        # Per-game random seed and starting player selection
+        seed = int.from_bytes(os.urandom(4), 'big') % (2 ** 31)
+        if getattr(self.config, 'random_start', False):
+            starting_player = 'Player1' if (seed % 2 == 0) else 'Player2'
+            game_state['currentPlayerId'] = starting_player
+        else:
+            starting_player = game_state.get('currentPlayerId', 'Player1')
+
         move_history = []
         move_count = 0
         max_moves = 500
@@ -452,6 +658,7 @@ class SelfPlayGenerator:
             move_count += 1
 
         end_ms = int(time.time() * 1000)
+        duration_ms = end_ms - start_ms
 
         return {
             'game_id': f'selfplay_{game_id}_{end_ms}',
@@ -460,6 +667,14 @@ class SelfPlayGenerator:
             'total_moves': move_count,
             'start_time': start_ms,
             'end_time': end_ms,
+            'game_duration_ms': duration_ms,
+            'metadata': {
+                'seed': seed,
+                'starting_player': starting_player,
+                'exploration_rate': self.config.exploration_rate,
+                'search_depth': self.config.search_depth,
+                'temperature': getattr(self.config, 'temperature', None)
+            },
             'timestamp': datetime.fromtimestamp(end_ms / 1000.0).isoformat(),
         }
 
@@ -765,6 +980,32 @@ async def main():
     """Main entry point with CLI argument parsing."""
     import argparse
 
+    # Load environment variables from .env when available.
+    # Prefer python-dotenv if installed; fall back to a lightweight loader.
+    try:
+        from dotenv import load_dotenv
+        # load_dotenv reads a .env file and does not overwrite existing env vars by default
+        load_dotenv()
+    except Exception:
+        env_path = os.path.join(os.getcwd(), '.env')
+        if os.path.exists(env_path):
+            try:
+                with open(env_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        if '=' not in line:
+                            continue
+                        k, v = line.split('=', 1)
+                        k = k.strip()
+                        v = v.strip().strip('"').strip("'")
+                        # Don't overwrite existing environment variables
+                        if os.getenv(k) is None:
+                            os.environ[k] = v
+            except Exception:
+                logger.debug('Failed to load .env file', exc_info=True)
+
     parser = argparse.ArgumentParser(
         description='Self-play training data generator'
     )
@@ -799,6 +1040,17 @@ async def main():
         help='Random move exploration rate 0-1 (default: 0.1)'
     )
     parser.add_argument(
+        '--random-start',
+        action='store_true',
+        help='Randomize starting player for each game'
+    )
+    parser.add_argument(
+        '--temperature',
+        type=float,
+        default=1.0,
+        help='Sampling temperature for stochastic policies (default: 1.0)'
+    )
+    parser.add_argument(
         '--dry-run',
         action='store_true',
         help='Run without database writes'
@@ -815,6 +1067,12 @@ async def main():
         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
         help='Logging level (default: INFO)'
     )
+    parser.add_argument(
+        '--metrics-port',
+        type=int,
+        default=None,
+        help='Port to expose Prometheus metrics (default: none)'
+    )
 
     args = parser.parse_args()
 
@@ -828,6 +1086,9 @@ async def main():
         ),
         search_depth=args.search_depth,
         exploration_rate=args.exploration_rate,
+        random_start=args.random_start,
+        temperature=args.temperature,
+        metrics_port=args.metrics_port,
         dry_run=args.dry_run,
         batch_only=args.batch_only,
         log_level=args.log_level,

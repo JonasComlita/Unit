@@ -1,3 +1,71 @@
+#!/usr/bin/env python3
+"""Minimal training pipeline example.
+
+This script demonstrates reading exported Parquet (or JSONL) and running a
+very small baseline evaluation: majority-class predictor and a simple
+train/val split. It purposefully avoids heavy ML deps so it can run in CI.
+"""
+import argparse
+import json
+import statistics
+from typing import List
+
+try:
+    import pandas as pd
+except Exception:
+    pd = None
+
+
+def load_parquet(path: str):
+    if pd is None:
+        raise RuntimeError('pandas/pyarrow required to read Parquet')
+    df = pd.read_parquet(path)
+    return df
+
+
+def majority_baseline(labels: List[str]):
+    counts = {}
+    for l in labels:
+        counts[l] = counts.get(l, 0) + 1
+    if not counts:
+        return None
+    majority = max(counts.items(), key=lambda x: x[1])[0]
+    acc = sum(1 for l in labels if l == majority) / len(labels)
+    return majority, acc
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser()
+    p.add_argument('--data', required=True, help='Path to Parquet or JSONL file (Parquet recommended)')
+    args = p.parse_args(argv)
+
+    if args.data.endswith('.parquet'):
+        df = load_parquet(args.data)
+        # Expect winner column
+        labels = df['winner'].tolist() if 'winner' in df.columns else []
+    else:
+        # simple JSONL loader
+        labels = []
+        with open(args.data, 'r') as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                    if 'winner' in obj:
+                        labels.append(obj['winner'])
+                except Exception:
+                    continue
+
+    if not labels:
+        print('No labels found in dataset')
+        return 2
+
+    majority, acc = majority_baseline(labels)
+    print(f'Majority label: {majority}, accuracy on full set: {acc:.3f}')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
 """
 Complete Training Pipeline for Unit Game AI
 

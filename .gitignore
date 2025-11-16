@@ -1,14 +1,47 @@
+# Node
 node_modules/
 node_modules/.cache/
+
+# Build artifacts
 dist/
-.env
-.DS_Store
 build/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
 coverage/
+htmlcov/
+*.egg-info/
+pip-wheel-metadata/
+
+# Virtual environments
+venv/
+.venv/
+.venv311/
+env/
+
+# Environment files
+.env
+.env.*
+
+# OS/editor files
+.DS_Store
 .vscode/
 .idea/
-serve.sh
-.venv311
-__pycache__/
-.pytest_cache/
-scripts/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Backups and data exports
+/backups/
+*.dump
+data/
+data_raw/
+data/splits/
+
+# Misc
+.python-version

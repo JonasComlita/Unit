@@ -1,0 +1,19 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: unit_user
+      POSTGRES_PASSWORD: unit_pass
+      POSTGRES_DB: unitgame
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unit_user -d unitgame"]
+      interval: 10s
+      retries: 5
+
+volumes:
+  pgdata:

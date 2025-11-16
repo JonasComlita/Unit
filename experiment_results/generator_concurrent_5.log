@@ -1,0 +1,88 @@
+2025-11-15 21:21:44 - __main__ - INFO - Initializing database connection pool...
+2025-11-15 21:21:44 - __main__ - INFO - Database pool initialized (min=5, max=20)
+2025-11-15 21:21:44 - __main__ - INFO - Database writer worker started
+2025-11-15 21:21:44 - __main__ - INFO - Starting self-play generation - concurrent_games=5, batch_size=100, dry_run=False
+2025-11-15 21:21:44 - __main__ - INFO - Writer worker running
+2025-11-15 21:21:45 - __main__ - INFO - Batch complete: 5 games in 1.0s (5.00 games/s)
+2025-11-15 21:21:45 - __main__ - INFO - Stats - Avg moves: 185.6, P1 wins: 5 (100.0%), P2 wins: 0 (0.0%), Draws: 0
+2025-11-15 21:21:45 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:46 - __main__ - INFO - Batch complete: 5 games in 0.8s (6.48 games/s)
+2025-11-15 21:21:46 - __main__ - INFO - Stats - Avg moves: 139.8, P1 wins: 3 (60.0%), P2 wins: 2 (40.0%), Draws: 0
+2025-11-15 21:21:46 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:47 - __main__ - INFO - Batch complete: 5 games in 0.9s (5.37 games/s)
+2025-11-15 21:21:47 - __main__ - INFO - Stats - Avg moves: 175.0, P1 wins: 3 (60.0%), P2 wins: 2 (40.0%), Draws: 0
+2025-11-15 21:21:47 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:48 - __main__ - INFO - Batch complete: 5 games in 0.7s (6.99 games/s)
+2025-11-15 21:21:48 - __main__ - INFO - Stats - Avg moves: 142.8, P1 wins: 4 (80.0%), P2 wins: 1 (20.0%), Draws: 0
+2025-11-15 21:21:48 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:48 - __main__ - INFO - Batch complete: 5 games in 0.6s (7.94 games/s)
+2025-11-15 21:21:48 - __main__ - INFO - Stats - Avg moves: 124.6, P1 wins: 3 (60.0%), P2 wins: 2 (40.0%), Draws: 0
+2025-11-15 21:21:48 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:49 - __main__ - INFO - Batch complete: 5 games in 0.7s (7.08 games/s)
+2025-11-15 21:21:49 - __main__ - INFO - Stats - Avg moves: 139.6, P1 wins: 4 (80.0%), P2 wins: 1 (20.0%), Draws: 0
+2025-11-15 21:21:49 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:50 - __main__ - INFO - Batch complete: 5 games in 0.8s (6.01 games/s)
+2025-11-15 21:21:50 - __main__ - INFO - Stats - Avg moves: 161.8, P1 wins: 5 (100.0%), P2 wins: 0 (0.0%), Draws: 0
+2025-11-15 21:21:50 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:50 - __main__ - INFO - Batch complete: 5 games in 0.5s (9.68 games/s)
+2025-11-15 21:21:50 - __main__ - INFO - Stats - Avg moves: 106.0, P1 wins: 3 (60.0%), P2 wins: 2 (40.0%), Draws: 0
+2025-11-15 21:21:50 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:51 - __main__ - INFO - Batch complete: 5 games in 0.6s (8.73 games/s)
+2025-11-15 21:21:51 - __main__ - INFO - Stats - Avg moves: 118.8, P1 wins: 3 (60.0%), P2 wins: 2 (40.0%), Draws: 0
+2025-11-15 21:21:51 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:52 - __main__ - INFO - Batch complete: 5 games in 0.5s (9.40 games/s)
+2025-11-15 21:21:52 - __main__ - INFO - Stats - Avg moves: 105.0, P1 wins: 4 (80.0%), P2 wins: 1 (20.0%), Draws: 0
+2025-11-15 21:21:52 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:52 - __main__ - INFO - Batch complete: 5 games in 0.5s (10.96 games/s)
+2025-11-15 21:21:52 - __main__ - INFO - Stats - Avg moves: 92.2, P1 wins: 2 (40.0%), P2 wins: 3 (60.0%), Draws: 0
+2025-11-15 21:21:52 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:53 - __main__ - INFO - Batch complete: 5 games in 0.5s (9.55 games/s)
+2025-11-15 21:21:53 - __main__ - INFO - Stats - Avg moves: 104.0, P1 wins: 4 (80.0%), P2 wins: 1 (20.0%), Draws: 0
+2025-11-15 21:21:53 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:53 - __main__ - INFO - Batch complete: 5 games in 0.9s (5.81 games/s)
+2025-11-15 21:21:53 - __main__ - INFO - Stats - Avg moves: 156.6, P1 wins: 4 (80.0%), P2 wins: 1 (20.0%), Draws: 0
+2025-11-15 21:21:53 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:54 - __main__ - INFO - Batch complete: 5 games in 0.7s (7.49 games/s)
+2025-11-15 21:21:54 - __main__ - INFO - Stats - Avg moves: 128.6, P1 wins: 5 (100.0%), P2 wins: 0 (0.0%), Draws: 0
+2025-11-15 21:21:54 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:55 - __main__ - INFO - Batch complete: 5 games in 0.7s (6.91 games/s)
+2025-11-15 21:21:55 - __main__ - INFO - Stats - Avg moves: 141.2, P1 wins: 3 (60.0%), P2 wins: 2 (40.0%), Draws: 0
+2025-11-15 21:21:55 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:56 - __main__ - INFO - Batch complete: 5 games in 0.8s (6.01 games/s)
+2025-11-15 21:21:56 - __main__ - INFO - Stats - Avg moves: 166.2, P1 wins: 5 (100.0%), P2 wins: 0 (0.0%), Draws: 0
+2025-11-15 21:21:56 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:57 - __main__ - INFO - Batch complete: 5 games in 0.9s (5.63 games/s)
+2025-11-15 21:21:57 - __main__ - INFO - Stats - Avg moves: 169.2, P1 wins: 4 (80.0%), P2 wins: 1 (20.0%), Draws: 0
+2025-11-15 21:21:57 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:57 - __main__ - INFO - Batch complete: 5 games in 0.5s (9.28 games/s)
+2025-11-15 21:21:57 - __main__ - INFO - Stats - Avg moves: 111.6, P1 wins: 3 (60.0%), P2 wins: 2 (40.0%), Draws: 0
+2025-11-15 21:21:57 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:58 - __main__ - INFO - Batch complete: 5 games in 0.6s (8.01 games/s)
+2025-11-15 21:21:58 - __main__ - INFO - Stats - Avg moves: 129.4, P1 wins: 3 (60.0%), P2 wins: 2 (40.0%), Draws: 0
+2025-11-15 21:21:58 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:59 - __main__ - INFO - Batch complete: 5 games in 0.8s (6.03 games/s)
+2025-11-15 21:21:59 - __main__ - INFO - Stats - Avg moves: 160.6, P1 wins: 4 (80.0%), P2 wins: 1 (20.0%), Draws: 0
+2025-11-15 21:21:59 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:21:59 - __main__ - INFO - Batch complete: 5 games in 0.6s (8.18 games/s)
+2025-11-15 21:21:59 - __main__ - INFO - Stats - Avg moves: 115.2, P1 wins: 4 (80.0%), P2 wins: 1 (20.0%), Draws: 0
+2025-11-15 21:21:59 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:22:00 - __main__ - INFO - Batch complete: 5 games in 0.6s (8.02 games/s)
+2025-11-15 21:22:00 - __main__ - INFO - Stats - Avg moves: 117.0, P1 wins: 2 (40.0%), P2 wins: 3 (60.0%), Draws: 0
+2025-11-15 21:22:00 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:22:00 - __main__ - INFO - Batch complete: 5 games in 0.7s (7.14 games/s)
+2025-11-15 21:22:00 - __main__ - INFO - Stats - Avg moves: 133.2, P1 wins: 3 (60.0%), P2 wins: 2 (40.0%), Draws: 0
+2025-11-15 21:22:00 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:22:01 - __main__ - INFO - Shutdown requested...
+2025-11-15 21:22:01 - __main__ - INFO - Shutting down database writer...
+2025-11-15 21:22:01 - __main__ - INFO - Batch complete: 5 games in 1.0s (5.08 games/s)
+2025-11-15 21:22:01 - __main__ - INFO - Stats - Avg moves: 169.2, P1 wins: 5 (100.0%), P2 wins: 0 (0.0%), Draws: 0
+2025-11-15 21:22:01 - __main__ - INFO - Starting player distribution: Player1:5
+2025-11-15 21:22:01 - __main__ - INFO - Metrics Summary - Games Generated: 120, Games Saved: 3, DB Errors: 4, Game Errors: 0, Elapsed: 17.2s, Rate: 6.99 games/s
+2025-11-15 21:22:01 - __main__ - INFO - Shutdown requested...
+2025-11-15 21:22:01 - __main__ - INFO - Shutting down database writer...
+2025-11-15 21:22:02 - __main__ - INFO - Writer worker shutting down
+2025-11-15 21:22:02 - __main__ - INFO - Writer worker stopped
+2025-11-15 21:22:02 - __main__ - INFO - Writer worker stopped
+2025-11-15 21:22:02 - __main__ - INFO - Database pool closed
+2025-11-15 21:22:02 - __main__ - INFO - Metrics Summary - Games Generated: 120, Games Saved: 116, DB Errors: 4, Game Errors: 0, Elapsed: 17.7s, Rate: 6.77 games/s
+2025-11-15 21:22:02 - __main__ - INFO - Shutdown complete
