@@ -15,31 +15,41 @@ import { Vertex } from '../game/types';
 const UnitGame: React.FC = () => {
   const scene = useScene();
   const vfxRef = useRef<VisualEffectsManager | null>(null);
+  const [visualQuality, setVisualQuality] = useState<'low' | 'medium' | 'high'>(
+    isMobile() ? 'medium' : 'high'
+  );
 
   // Initialize visual effects when scene is ready
   useEffect(() => {
-    if (!scene || vfxRef.current) return;
+    if (!scene) return;
 
-    // Create visual effects manager
-    vfxRef.current = new VisualEffectsManager(scene, {
-      enableParticles: true,
-      enableGlow: true,
-      enableAnimations: true,
-      enableShadows: !isMobile(), // Desktop only
-      enablePostProcessing: !isMobile(), // Desktop only
-      quality: isMobile() ? 'medium' : 'high'
-    });
+    // If the manager isn't created yet, create it with the current visualQuality.
+    // If it already exists, update its quality when visualQuality changes.
+    if (!vfxRef.current) {
+      vfxRef.current = new VisualEffectsManager(scene, {
+        enableParticles: true,
+        enableGlow: true,
+        enableAnimations: true,
+        enableShadows: !isMobile(), // Desktop only
+        enablePostProcessing: !isMobile(), // Desktop only
+        quality: visualQuality || (isMobile() ? 'medium' : 'high')
+      });
+      console.log('✨ Visual effects initialized (quality:', visualQuality, ')');
 
-    console.log('✨ Visual effects initialized');
+      // Cleanup on unmount
+      return () => {
+        if (vfxRef.current) {
+          vfxRef.current.dispose();
+          vfxRef.current = null;
+        }
+      };
+    }
 
-    // Cleanup on unmount
-    return () => {
-      if (vfxRef.current) {
-        vfxRef.current.dispose();
-        vfxRef.current = null;
-      }
-    };
-  }, [scene]);
+    // If the manager exists and visualQuality changed, ensure it's applied.
+    if (vfxRef.current && visualQuality) {
+      vfxRef.current.updateQuality(visualQuality);
+    }
+  }, [scene, visualQuality]);
 
   const { gameState, handleAction: baseHandleAction, undo, moveHistory } = useGame();
   const [activePhase, setActivePhase] = useState<ActionPhase | null>(null);
@@ -50,13 +60,14 @@ const UnitGame: React.FC = () => {
   // Pulse animation for selected pieces
   useEffect(() => {
     const selectedVertexId = gameState.selectedVertexId;
-    if (selectedVertexId && vfx && scene) {
+    const manager = vfxRef.current;
+    if (selectedVertexId && manager && scene) {
       const mesh = scene.getMeshByName(`piece-${selectedVertexId}`);
       if (mesh) {
-        vfx.animatePulse(mesh, 2000);
+        manager.animatePulse(mesh, 2000);
       }
     }
-  }, [gameState.selectedVertexId, vfx, scene]);
+  }, [gameState.selectedVertexId, scene]);
   const handleAction = useCallback((action: any) => {
     baseHandleAction(action);
     // Add visual effects based on action type
@@ -206,14 +217,10 @@ const UnitGame: React.FC = () => {
     }
   }, [gameState, handleAction, activePhase]);
 
-  const [visualQuality, setVisualQuality] = useState<'low' | 'medium' | 'high'>(
-    isMobile() ? 'medium' : 'high'
-  );
-
   const handleQualityChange = (quality: 'low' | 'medium' | 'high') => {
     setVisualQuality(quality);
-    if (vfx) {
-      vfx.updateQuality(quality);
+    if (vfxRef.current) {
+      vfxRef.current.updateQuality(quality);
     }
   };
 

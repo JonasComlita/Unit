@@ -7,7 +7,7 @@ const DebugPanel: React.FC<{ gameState: GameState }> = ({ gameState }) => {
 
   return (
     <div style={{ position: 'absolute', top: 80, right: 12, zIndex: 200 }}>
-      <div style={{ width: open ? 360 : 48, background: 'rgba(0,0,0,0.7)', color: 'white', borderRadius: 8, padding: open ? 12 : 6, boxShadow: '0 6px 18px rgba(0,0,0,0.6)', fontFamily: 'monospace', fontSize: 12 }}>
+      <div id="debug-panel-inner" style={{ width: open ? 360 : 48, background: 'rgba(0,0,0,0.7)', color: 'white', borderRadius: 8, padding: open ? 12 : 6, boxShadow: '0 6px 18px rgba(0,0,0,0.6)', fontFamily: 'monospace', fontSize: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <strong style={{ fontSize: 13 }}>{open ? 'Debug Panel' : 'DBG'}</strong>
           <button onClick={() => setOpen(!open)} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }}>{open ? '▢' : '▤'}</button>

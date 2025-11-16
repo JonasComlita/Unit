@@ -42,6 +42,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
   const [showSettings, setShowSettings] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const [showQuickHelp, setShowQuickHelp] = useState(false);
+  const [quickHelpRightPx, setQuickHelpRightPx] = useState<number | null>(384);
   const [panelState, setPanelState] = useState<PanelState>('default');
   const [message, setMessage] = useState<string | null>(null);
   const [activeAction, setActiveAction] = useState<'move' | 'attack' | 'infuse' | null>(null);
@@ -74,6 +75,37 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
       return () => clearTimeout(timer);
     }
   }, [message]);
+
+  // Position the Quick Help button adjacent to the DebugPanel by measuring it.
+  useEffect(() => {
+  let observer: ResizeObserver | null = null;
+  const el = document.getElementById('debug-panel-inner');
+    const gap = 8; // px gap between quick-help and debug panel
+    const baseRight = 12; // DebugPanel right offset
+    const update = () => {
+      if (!el) {
+        setQuickHelpRightPx(384);
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const panelWidth = Math.round(rect.width || 0);
+      setQuickHelpRightPx(baseRight + panelWidth + gap);
+    };
+
+    if (el && (window as any).ResizeObserver) {
+      // ResizeObserver type from window may differ in this TS environment; use any to construct.
+  // @ts-ignore
+  observer = new (window as any).ResizeObserver(update);
+  observer!.observe(el as Element);
+    }
+    // initial update and on window resize
+    update();
+    window.addEventListener('resize', update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
 
   const handleActionClick = (action: 'move' | 'attack' | 'infuse') => {
     if (action === 'move' && turn.hasMoved) {
@@ -237,6 +269,34 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
         </div>
       </div>
 
+      {/* Floating Quick Help Button (adjacent to DebugPanel) */}
+      <div style={{ position: 'absolute', top: 80, right: quickHelpRightPx ? `${quickHelpRightPx}px` : '384px', zIndex: 199 }}>
+        <button
+          onClick={() => setShowQuickHelp(s => !s)}
+          title="Quick Help"
+          aria-label="Quick Help"
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: 8,
+            background: 'rgba(0,0,0,0.7)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            color: 'white',
+            fontSize: 16,
+            cursor: 'pointer',
+            boxShadow: '0 6px 18px rgba(0,0,0,0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontFamily: 'monospace, system-ui, -apple-system, sans-serif',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.filter = 'brightness(1.08)')}
+          onMouseLeave={e => (e.currentTarget.style.filter = 'none')}
+        >
+          ❔
+        </button>
+      </div>
+
       {/* Menu Overlay */}
       {showMenu && (
         <div style={{
@@ -272,24 +332,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
           >
             📖 Tutorial
           </button>
-          <button style={{
-            width: '100%',
-            padding: '12px',
-            marginTop: '8px',
-            background: 'rgba(255,255,255,0.06)',
-            border: '1px solid rgba(255,255,255,0.18)',
-            borderRadius: '8px',
-            color: 'white',
-            fontSize: '14px',
-            cursor: 'pointer',
-          }}
-          onClick={() => {
-            setShowQuickHelp(s => !s);
-            setShowMenu(false);
-          }}
-          >
-            ⚙️ Quick Help
-          </button>
+          {/* Quick Help moved to floating button next to DebugPanel (removed from menu) */}
           <button style={{
             width: '100%',
             padding: '12px',
