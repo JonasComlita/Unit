@@ -1,0 +1,250 @@
+from typing import Dict, List, Any, Optional
+import copy
+
+
+def _get_board_layout() -> List[int]:
+    # Mirror default used in SelfPlayGenerator
+    return [3, 5, 7, 5, 3]
+
+
+def initialize_game() -> Dict[str, Any]:
+    board_layout = _get_board_layout()
+    vertices = {}
+    vertex_id = 0
+    for layer_idx, size in enumerate(board_layout):
+        for x in range(size):
+            for z in range(size):
+                vid = f"v{vertex_id}"
+                vertices[vid] = {
+                    'id': vid,
+                    'layer': layer_idx,
+                    'x': x,
+                    'z': z,
+                    'stack': [],
+                    'energy': 0,
+                    'adjacencies': []
+                }
+                vertex_id += 1
+
+    # set adjacencies (4-connected grid per layer)
+    for vid, vertex in vertices.items():
+        adj = []
+        layer_verts = [v for v in vertices.values() if v['layer'] == vertex['layer']]
+        for other in layer_verts:
+            if other['id'] != vid:
+                dx = abs(other['x'] - vertex['x'])
+                dz = abs(other['z'] - vertex['z'])
+                if (dx == 1 and dz == 0) or (dx == 0 and dz == 1):
+                    adj.append(other['id'])
+        vertex['adjacencies'] = adj
+
+    # corners for home positions (simplified)
+    layer0 = [v for v in vertices.values() if v['layer'] == 0]
+    corners_p1 = [v['id'] for v in layer0 if v['x'] == 0 and v['z'] == 0]
+    corners_p2 = [v['id'] for v in layer0 if v['x'] == max([lv['x'] for lv in layer0]) and v['z'] == max([lv['z'] for lv in layer0])]
+
+    return {
+        'vertices': vertices,
+        'currentPlayerId': 'Player1',
+        'winner': None,
+        'turn': {
+            'hasPlaced': False,
+            'hasInfused': False,
+            'hasMoved': False,
+            'turnNumber': 1
+        },
+        'players': {
+            'Player1': {'reinforcements': 3},
+            'Player2': {'reinforcements': 3}
+        },
+        'homeCorners': {
+            'Player1': corners_p1 if corners_p1 else [list(vertices.keys())[0]],
+            'Player2': corners_p2 if corners_p2 else [list(vertices.keys())[-1]]
+        }
+    }
+
+
+def get_legal_moves(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Reimplementation of SelfPlayGenerator.get_legal_moves for standalone
+    agent use. Returns a list of move dicts using the same keys as the
+    generator's implementation.
+    """
+    moves: List[Dict[str, Any]] = []
+    current_player = state['currentPlayerId']
+    turn = state['turn']
+    vertices = state['vertices']
+
+    # Placement
+    if not turn['hasPlaced'] and state['players'][current_player]['reinforcements'] > 0:
+        for corner_id in state['homeCorners'][current_player]:
+            moves.append({'type': 'place', 'vertexId': corner_id})
+
+    # Infusion
+    if not turn['hasInfused']:
+        for vid, vertex in vertices.items():
+            if vertex['stack'] and vertex['stack'][0]['player'] == current_player:
+                if vertex.get('energy', 0) < 10:
+                    moves.append({'type': 'infuse', 'vertexId': vid})
+
+    # Movement
+    if not turn['hasMoved']:
+        for vid, vertex in vertices.items():
+            if vertex['stack'] and vertex['stack'][0]['player'] == current_player:
+                for target_id in vertex['adjacencies']:
+                    target = vertices[target_id]
+                    if not target['stack']:
+                        moves.append({'type': 'move', 'fromId': vid, 'toId': target_id})
+
+    # Attack
+    for vid, vertex in vertices.items():
+        if vertex['stack'] and vertex['stack'][0]['player'] == current_player:
+            if len(vertex['stack']) >= 1 and vertex.get('energy', 0) >= 1:
+                for target_id in vertex['adjacencies']:
+                    target = vertices[target_id]
+                    if target['stack'] and target['stack'][0]['player'] != current_player:
+                        moves.append({'type': 'attack', 'vertexId': vid, 'targetId': target_id})
+
+    # Pincer
+    for vid, vertex in vertices.items():
+        if vertex['stack'] and vertex['stack'][0]['player'] == current_player and vertex.get('energy', 0) >= 2:
+            adjacent_enemies = [t for t in vertex['adjacencies'] if vertices[t]['stack'] and vertices[t]['stack'][0]['player'] != current_player]
+            for target_id in adjacent_enemies:
+                moves.append({'type': 'pincer', 'vertexId': vid, 'targetId': target_id})
+
+    if turn['hasPlaced'] and turn['hasInfused'] and turn['hasMoved']:
+        moves.append({'type': 'endTurn'})
+
+    if not moves:
+        moves.append({'type': 'endTurn'})
+
+    return moves
+
+
+def apply_move(state: Dict[str, Any], move: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Apply a move to a copy of state and return the new state. Mirrors the
+    simplified rules used in SelfPlayGenerator.apply_move.
+    """
+    new_state = copy.deepcopy(state)
+    move_type = move.get('type')
+    current_player = new_state['currentPlayerId']
+
+    if move_type == 'place':
+        vertex_id = move['vertexId']
+        vertex = new_state['vertices'][vertex_id]
+        # create a simple piece id based on stack length
+        vertex['stack'].append({'player': current_player, 'id': f"p{len(vertex['stack'])}"})
+        new_state['players'][current_player]['reinforcements'] -= 1
+        new_state['turn']['hasPlaced'] = True
+
+    elif move_type == 'infuse':
+        vertex_id = move['vertexId']
+        new_state['vertices'][vertex_id]['energy'] += 1
+        new_state['turn']['hasInfused'] = True
+
+    elif move_type == 'move':
+        from_id = move['fromId']
+        to_id = move['toId']
+        source = new_state['vertices'][from_id]
+        target = new_state['vertices'][to_id]
+        target['stack'] = source['stack']
+        target['energy'] = source['energy']
+        source['stack'] = []
+        source['energy'] = 0
+        new_state['turn']['hasMoved'] = True
+
+    elif move_type == 'attack':
+        attacker_id = move['vertexId']
+        defender_id = move['targetId']
+        attacker = new_state['vertices'][attacker_id]
+        defender = new_state['vertices'][defender_id]
+        attacker_strength = len(attacker['stack']) * 10 + attacker.get('energy', 0) * 15
+        defender_strength = len(defender['stack']) * 10 + defender.get('energy', 0) * 15
+        if attacker_strength > defender_strength:
+            defender['stack'] = attacker['stack']
+            defender['energy'] = max(0, attacker.get('energy', 0) - defender.get('energy', 0))
+        else:
+            defender['energy'] = max(0, defender.get('energy', 0) - attacker.get('energy', 0))
+        attacker['stack'] = []
+        attacker['energy'] = 0
+        new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
+        new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
+        new_state['turn'] = {
+            'hasPlaced': False,
+            'hasInfused': False,
+            'hasMoved': False,
+            'turnNumber': new_state['turn']['turnNumber'] + 1
+        }
+
+    elif move_type == 'pincer':
+        attacker_id = move.get('vertexId')
+        defender_id = move.get('targetId')
+        attacker = new_state['vertices'].get(attacker_id)
+        defender = new_state['vertices'].get(defender_id)
+        if not attacker or not defender:
+            return new_state
+        if not attacker.get('stack') or attacker.get('energy', 0) < 2:
+            return new_state
+        attacker_strength = len(attacker['stack']) * 10 + attacker.get('energy', 0) * 15
+        defender_strength = len(defender['stack']) * 10 + defender.get('energy', 0) * 15
+        attacker_strength += 10
+        if attacker_strength > defender_strength:
+            defender['stack'] = attacker['stack']
+            defender['energy'] = max(0, attacker.get('energy', 0) - defender.get('energy', 0) - 1)
+        else:
+            defender['energy'] = max(0, defender.get('energy', 0) - attacker.get('energy', 0))
+        attacker['stack'] = []
+        attacker['energy'] = 0
+        new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
+        new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
+        new_state['turn'] = {
+            'hasPlaced': False,
+            'hasInfused': False,
+            'hasMoved': False,
+            'turnNumber': new_state['turn']['turnNumber'] + 1
+        }
+
+    elif move_type == 'endTurn':
+        new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
+        new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
+        new_state['turn'] = {
+            'hasPlaced': False,
+            'hasInfused': False,
+            'hasMoved': False,
+            'turnNumber': new_state['turn']['turnNumber'] + 1
+        }
+
+    # Check winner (control opponent corners)
+    for player in ['Player1', 'Player2']:
+        opponent = 'Player2' if player == 'Player1' else 'Player1'
+        opponent_corners = new_state['homeCorners'][opponent]
+        if opponent_corners and all(
+            new_state['vertices'][cid]['stack'] and new_state['vertices'][cid]['stack'][0]['player'] == player
+            for cid in opponent_corners
+        ):
+            new_state['winner'] = player
+            break
+
+    return new_state
+
+
+def evaluate_position(state: Dict[str, Any], perspective: Optional[str] = None) -> float:
+    """
+    Simple evaluation used by the greedy agent and as a heuristic for A*.
+    Positive favors perspective (defaults to state's currentPlayerId).
+    """
+    score = 0.0
+    current_player = perspective if perspective is not None else state.get('currentPlayerId')
+    vertices = state.get('vertices', {})
+    for vertex in vertices.values():
+        if vertex.get('stack'):
+            owner = vertex['stack'][0]['player']
+            piece_count = len(vertex['stack'])
+            energy = vertex.get('energy', 0)
+            value = piece_count * 10 + energy * 15
+            if owner == current_player:
+                score += value
+            else:
+                score -= value
+    return score

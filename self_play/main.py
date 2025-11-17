@@ -1,9 +1,11 @@
+# ./.venv311/bin/python -m self_play.main --use-gpu-inference-server  --num-workers 12 --file-writer --shard-format parquet --shard-move-mode compressed --trim-states --random-start --shard-dir shards/v1_model_data --model-device cuda --game-version v1-nn
+# ./.venv311/bin/python -m self_play.main --use-gpu-inference-server  --num-workers 12 --file-writer --shard-format parquet --shard-move-mode compressed --trim-states --random-start --shard-dir shards/v1_model_data --use-model --model-path checkpoints/best_model.pt --model-device cuda --game-version v1-nn
+
 # Top-level worker entry for multiprocessing
 def worker_entry(worker_id, gpu_inference_request_queue, unknown_args):
     import sys
     sys.argv = [sys.argv[0]] + unknown_args
     run_worker(worker_id, gpu_inference_request_queue)
-"""./.venv311/bin/python -m self_play.main --num-workers 12 --file-writer --shard-format parquet --shard-move-mode compressed --trim-states --random-start --shard-dir shards/v1_model_data --use-model --model-path checkpoints/best_model.pt --model-device cuda --game-version v1-nn"""
 
 import asyncio
 import os
