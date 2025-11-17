@@ -425,7 +425,7 @@ def create_optimized_model_fn(model, device):
         raise RuntimeError("PyTorch required for optimized model function")
     
     # Import state_to_tensor here to avoid circular imports
-    from neural_network_model import state_to_tensor
+    from self_play.neural_network_model import state_to_tensor
     
     def model_fn(batch_states: List[dict]) -> List[Tuple[np.ndarray, float]]:
         """Process a batch of game states efficiently on GPU.

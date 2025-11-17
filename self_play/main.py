@@ -1,5 +1,9 @@
-"""./.venv311/bin/python -m self_play.main --file-writer --shard-format parquet --shard-move-mode compressed --trim-states --random-start --shard-dir shards/v1_model_data --use-model --model
--path checkpoints/best_model.pt --model-device cuda --game-version v1-nn"""
+# Top-level worker entry for multiprocessing
+def worker_entry(worker_id, gpu_inference_request_queue, unknown_args):
+    import sys
+    sys.argv = [sys.argv[0]] + unknown_args
+    run_worker(worker_id, gpu_inference_request_queue)
+"""./.venv311/bin/python -m self_play.main --num-workers 12 --file-writer --shard-format parquet --shard-move-mode compressed --trim-states --random-start --shard-dir shards/v1_model_data --use-model --model-path checkpoints/best_model.pt --model-device cuda --game-version v1-nn"""
 
 import asyncio
 import os
@@ -18,6 +22,14 @@ logging.basicConfig(
 async def main():
     """Main entry point with CLI argument parsing."""
     import argparse
+    parser = argparse.ArgumentParser(
+        description='Self-play training data generator'
+    )
+    parser.add_argument(
+        '--use-gpu-inference-server',
+        action='store_true',
+        help='Enable centralized GPU inference server for multi-worker setups'
+    )
 
     # Load environment variables from .env when available.
     # Prefer python-dotenv if installed; fall back to a lightweight loader.
@@ -44,10 +56,6 @@ async def main():
                             os.environ[k] = v
             except Exception:
                 logger.debug('Failed to load .env file', exc_info=True)
-
-    parser = argparse.ArgumentParser(
-        description='Self-play training data generator'
-    )
     parser.add_argument(
         '--concurrent-games',
         type=int,
@@ -207,6 +215,11 @@ async def main():
     )
 
     # Build config from args
+    # If using centralized GPU inference server, pass the request_queue
+    gpu_inference_request_queue = None
+    if getattr(args, 'use_gpu_inference_server', False):
+        import multiprocessing as mp
+        gpu_inference_request_queue = mp.Queue()
     config = SelfPlayConfig(
         concurrent_games=args.concurrent_games,
         games_per_batch=args.games_per_batch,
@@ -235,6 +248,9 @@ async def main():
         shard_move_mode=args.shard_move_mode,
         shard_dir=args.shard_dir,
     )
+    # Attach extra attributes if needed
+    setattr(config, 'use_gpu_inference_server', getattr(args, 'use_gpu_inference_server', False))
+    setattr(config, 'gpu_inference_request_queue', gpu_inference_request_queue)
 
     # stamp generator/game version into config for metadata
     if args.game_version:
@@ -280,6 +296,65 @@ async def main():
     finally:
         await generator.shutdown()
 
+import multiprocessing
+
+def run_worker(worker_id, args, gpu_inference_request_queue=None):
+    import sys
+    # Set the queue in environment variable for worker
+    if gpu_inference_request_queue is not None:
+        # Optionally, set a global or environment variable if needed
+        pass
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        print(f"Worker {worker_id} failed: {e}", file=sys.stderr)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import multiprocessing as mp
+    mp.set_start_method("spawn", force=True)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--num-workers', type=int, default=None, help='Number of parallel workers (default: CPU count)')
+    args, unknown = parser.parse_known_args()
+    num_workers = args.num_workers or multiprocessing.cpu_count()
+    # For single worker, just run as before
+    if num_workers == 1:
+        sys.argv = [sys.argv[0]] + unknown
+        asyncio.run(main())
+    else:
+        from services.gpu_inference_server import GPUInferenceServer
+        # Parse model path/device from CLI args
+        parser2 = argparse.ArgumentParser()
+        parser2.add_argument('--model-path', type=str, default=None)
+        parser2.add_argument('--model-device', type=str, default='cuda')
+        parser2.add_argument('--inference-batch-size', type=int, default=32)
+        parser2.add_argument('--inference-batch-timeout', type=float, default=0.02)
+        parser2.add_argument('--use-gpu-inference-server', action='store_true')
+        args2, _ = parser2.parse_known_args(unknown)
+        gpu_inference_request_queue = mp.Queue() if getattr(args2, 'use_gpu_inference_server', False) else None
+        server_process = None
+        if getattr(args2, 'use_gpu_inference_server', False):
+            server_process = GPUInferenceServer(
+                model_path=args2.model_path,
+                device=args2.model_device,
+                batch_size=args2.inference_batch_size,
+                timeout=args2.inference_batch_timeout
+            )
+            server_process.request_queue = gpu_inference_request_queue
+            server_process.start()
+        # Launch worker processes
+        processes = []
+        for i in range(num_workers):
+            p = mp.Process(target=worker_entry, args=(i, gpu_inference_request_queue, unknown))
+            p.start()
+            processes.append(p)
+        for p in processes:
+            p.join()
+        if server_process is not None:
+            server_process.shutdown()
+
+# Top-level worker entry for multiprocessing
+def worker_entry(worker_id, gpu_inference_request_queue, unknown_args):
+    import sys
+    sys.argv = [sys.argv[0]] + unknown_args
+    run_worker(worker_id, gpu_inference_request_queue)

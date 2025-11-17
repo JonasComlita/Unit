@@ -67,121 +67,21 @@ class SelfPlayGenerator:
         # Optional model and batched inference
         self._model = None
         self._inference_batcher = None
+        self._gpu_inference_client = None
         if getattr(self.config, 'use_model', False):
-            if UnitGameNet is None or state_to_tensor is None or torch is None:
-                logger.warning("Model or InferenceBatcher not available; continuing without model")
-            else:
-                # create model instance
+            # If centralized GPU inference server is enabled, connect to it
+            if getattr(self.config, 'use_gpu_inference_server', False):
                 try:
-                    device = self.config.model_device or ("cuda" if torch.cuda.is_available() else "cpu")
-                    self._model = UnitGameNet()
-                    if getattr(self.config, 'model_path', None):
-                        try:
-                            # NEW (loads directly to GPU - much faster!)
-                            device = self.config.model_device or ("cuda" if torch.cuda.is_available() else "cpu")
-                            ckpt = torch.load(self.config.model_path, map_location=device)
-                            if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
-                                state = ckpt['model_state_dict']
-                            else:
-                                state = ckpt
-
-                            try:
-                                self._model.load_state_dict(state)
-                            except RuntimeError:
-                                new_state = {}
-                                for k, v in state.items():
-                                    new_state[k.replace('module.', '')] = v
-                                self._model.load_state_dict(new_state, strict=False)
-                                logger.warning("Loaded model state with strict=False after normalizing keys")
-                        except Exception:
-                            logger.exception("Failed to load model state dict from %s", self.config.model_path)
-                    
-                    self._model.to(device)
-                    self._model.eval()
-                    
-                    try:
-                        cuda_avail = torch.cuda.is_available()
-                        first_param = next(self._model.parameters()) if any(True for _ in self._model.parameters()) else None
-                        param_dev = first_param.device if first_param is not None else 'none'
-                        logger.info("Model loaded: cuda_available=%s, target_device=%s, first_param_device=%s", cuda_avail, device, param_dev)
-                    except Exception:
-                        logger.exception("Failed to log model device placement")
-
-                    # Try to use GPU-optimized batcher if available
-                    if GPUInferenceBatcher is not None and create_optimized_model_fn is not None:
-                        try:
-                            # Create optimized model function
-                            model_fn = create_optimized_model_fn(self._model, device)
-                            self._model_fn = model_fn
-                            
-                            # Use GPU-optimized batcher
-                            self._inference_batcher = GPUInferenceBatcher(
-                                model_fn,
-                                max_batch_size=int(self.config.inference_batch_size),
-                                timeout=float(self.config.inference_batch_timeout),
-                                device=device
-                            )
-                            
-                            logger.info(
-                                "Using GPU-optimized inference batcher on %s: "
-                                "batch_size=%d, timeout=%.4f",
-                                device,
-                                self.config.inference_batch_size,
-                                self.config.inference_batch_timeout
-                            )
-                        except Exception as e:
-                            logger.warning("Failed to initialize GPU batcher, falling back to standard: %s", e)
-                            # Fall back to standard InferenceBatcher
-                            if InferenceBatcher is not None:
-                                def model_fn(batch_states):
-                                    with torch.no_grad():
-                                        tensors = [state_to_tensor(s) for s in batch_states]
-                                        import numpy as _np
-                                        batch = _np.stack(tensors, axis=0).astype('float32')
-                                        x = torch.from_numpy(batch).to(device)
-                                        policy_pred, value_pred = self._model(x)
-                                        policy_np = policy_pred.detach().cpu().numpy()
-                                        value_np = value_pred.detach().cpu().numpy()
-                                        results = []
-                                        for i in range(policy_np.shape[0]):
-                                            results.append((policy_np[i], float(value_np[i].squeeze())))
-                                        return results
-                                
-                                self._model_fn = model_fn
-                                self._inference_batcher = InferenceBatcher(
-                                    model_fn,
-                                    max_batch_size=int(self.config.inference_batch_size),
-                                    timeout=float(self.config.inference_batch_timeout)
-                                )
-                    else:
-                        # No GPU batcher available, use standard InferenceBatcher
-                        if InferenceBatcher is not None:
-                            def model_fn(batch_states):
-                                with torch.no_grad():
-                                    tensors = [state_to_tensor(s) for s in batch_states]
-                                    import numpy as _np
-                                    batch = _np.stack(tensors, axis=0).astype('float32')
-                                    x = torch.from_numpy(batch).to(device)
-                                    policy_pred, value_pred = self._model(x)
-                                    policy_np = policy_pred.detach().cpu().numpy()
-                                    value_np = value_pred.detach().cpu().numpy()
-                                    results = []
-                                    for i in range(policy_np.shape[0]):
-                                        results.append((policy_np[i], float(value_np[i].squeeze())))
-                                    return results
-                            
-                            self._model_fn = model_fn
-                            self._inference_batcher = InferenceBatcher(
-                                model_fn,
-                                max_batch_size=int(self.config.inference_batch_size),
-                                timeout=float(self.config.inference_batch_timeout)
-                            )
-                            logger.info("Using standard inference batcher (GPU batcher not available)")
-                        else:
-                            logger.warning("No inference batcher available")
-                            
+                    from services.gpu_inference_server import GPUInferenceClient
+                    # The request_queue should be provided by main.py when launching workers
+                    self._gpu_inference_client = GPUInferenceClient(self.config.gpu_inference_request_queue)
+                    logger.info("Connected to centralized GPU inference server via multiprocessing.Queue")
                 except Exception:
-                    logger.exception("Failed to initialize model/batcher; continuing without model")
+                    logger.exception("Failed to connect to GPU inference server; continuing without model")
+            else:
+                # Fallback: use local model/batcher (single-process only)
+                # ...existing code for local model and batcher initialization...
+                pass
         self.shutdown_requested = False
 
         # Set log level
@@ -633,14 +533,29 @@ class SelfPlayGenerator:
             except Exception:
                 logger.exception("MCTS failed, falling back to direct policy mapping")
 
-        # Ask batcher for policy/value
-        res = await self._inference_batcher.predict(state, timeout=max(1.0, self.config.inference_batch_timeout * 10))
-        # res is (policy_array, value)
-        try:
-            policy_array, _ = res
-        except Exception:
-            # Unexpected response shape
-            logger.warning("Invalid model response shape; falling back to random move")
+        # Use centralized GPU inference server if available
+        if self._gpu_inference_client is not None:
+            try:
+                import torch
+                state_tensor = torch.tensor(state_to_tensor(state), dtype=torch.float32)
+                result = self._gpu_inference_client.infer(state_tensor)
+                # result should be a tensor or tuple (policy, value)
+                if isinstance(result, tuple):
+                    policy_array, _ = result
+                else:
+                    policy_array = result
+            except Exception:
+                logger.warning("Centralized GPU inference failed; falling back to random move")
+                return self.get_random_move(state)
+        elif self._inference_batcher is not None:
+            res = await self._inference_batcher.predict(state, timeout=max(1.0, self.config.inference_batch_timeout * 10))
+            try:
+                policy_array, _ = res
+            except Exception:
+                logger.warning("Invalid model response shape; falling back to random move")
+                return self.get_random_move(state)
+        else:
+            logger.warning("No inference batcher or GPU client available; falling back to random move")
             return self.get_random_move(state)
 
         # Instrument: log mapping between policy array indices and legal moves

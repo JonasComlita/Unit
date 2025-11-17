@@ -1,8 +1,8 @@
 import pytest
 import numpy as np
 
-from neural_network_model import UnitGameNet
-from training_pipeline import TrainingDataProcessor
+from self_play.neural_network_model import UnitGameNet
+from self_play.training_pipeline import TrainingDataProcessor
 
 
 def test_unit_game_net_policy_shape():

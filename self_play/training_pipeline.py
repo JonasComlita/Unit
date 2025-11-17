@@ -94,7 +94,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 # Import your existing modules
-from neural_network_model import (
+from self_play.neural_network_model import (
     UnitGameNet, 
     UnitGameTrainer, 
     state_to_tensor
