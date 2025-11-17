@@ -29,7 +29,7 @@ class UnitGameNet(nn.Module):
                  num_vertices: int = 83,  # Total vertices in game
                  num_layers: int = 5,
                  board_channels: int = 32,
-                 policy_channels: int = 4,  # place, infuse, move, attack
+                 policy_channels: int = 5,  # place, infuse, move, attack, pincer
                  fc_size: int = 256):
         super().__init__()
         
@@ -242,7 +242,12 @@ class UnitGameTrainer:
             self.use_amp = bool(use_amp) and torch.cuda.is_available()
         self.model.to(self.device)
         # GradScaler only needed when using AMP and CUDA
-        self._scaler = torch.cuda.amp.GradScaler() if self.use_amp else None
+        # Use the modern `torch.amp` APIs to avoid deprecation warnings
+        try:
+            self._scaler = torch.amp.GradScaler() if self.use_amp else None
+        except Exception:
+            # Fallback for older torch versions
+            self._scaler = torch.cuda.amp.GradScaler() if self.use_amp else None
     
     def train_on_batch(self, 
                       states: np.ndarray, 
@@ -302,19 +307,36 @@ class UnitGameTrainer:
         # Training with optional AMP
         self.optimizer.zero_grad()
         if self.use_amp:
-            with torch.cuda.amp.autocast():
-                if pyg_batch_obj is not None:
-                    policy_pred, value_pred = self.model(data=pyg_batch_obj)
-                else:
-                    policy_pred, value_pred = self.model(states, edge_index=edge_index_tensor, batch_vec=batch_vec_tensor)
-                policy_loss = F.cross_entropy(policy_pred, policy_targets)
-                value_loss = F.mse_loss(value_pred.squeeze(), value_targets)
-                total_loss = policy_loss + value_loss
+            # Use torch.amp.autocast with the correct device type where supported
+            device_type = self.device.type if hasattr(self.device, 'type') else str(self.device)
+            try:
+                with torch.amp.autocast(device_type=device_type):
+                    if pyg_batch_obj is not None:
+                        policy_pred, value_pred = self.model(data=pyg_batch_obj)
+                    else:
+                        policy_pred, value_pred = self.model(states, edge_index=edge_index_tensor, batch_vec=batch_vec_tensor)
+                    policy_loss = F.cross_entropy(policy_pred, policy_targets)
+                    value_loss = F.mse_loss(value_pred.squeeze(), value_targets)
+                    total_loss = policy_loss + value_loss
 
-            # scale gradients
-            self._scaler.scale(total_loss).backward()
-            self._scaler.step(self.optimizer)
-            self._scaler.update()
+                # scale gradients
+                self._scaler.scale(total_loss).backward()
+                self._scaler.step(self.optimizer)
+                self._scaler.update()
+            except Exception:
+                # Fallback to older autocast API if needed
+                with torch.cuda.amp.autocast():
+                    if pyg_batch_obj is not None:
+                        policy_pred, value_pred = self.model(data=pyg_batch_obj)
+                    else:
+                        policy_pred, value_pred = self.model(states, edge_index=edge_index_tensor, batch_vec=batch_vec_tensor)
+                    policy_loss = F.cross_entropy(policy_pred, policy_targets)
+                    value_loss = F.mse_loss(value_pred.squeeze(), value_targets)
+                    total_loss = policy_loss + value_loss
+
+                self._scaler.scale(total_loss).backward()
+                self._scaler.step(self.optimizer)
+                self._scaler.update()
         else:
             if pyg_batch_obj is not None:
                 policy_pred, value_pred = self.model(data=pyg_batch_obj)

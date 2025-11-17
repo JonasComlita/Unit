@@ -7,8 +7,19 @@ train/val split. It purposefully avoids heavy ML deps so it can run in CI.
 """
 import argparse
 import json
+import copy
 import statistics
 from typing import List
+
+import dotenv
+# Ensure environment variables from .env at project root are loaded so
+# DATABASE_URL and other settings are available to the async pipeline.
+try:
+    dotenv.load_dotenv()
+except Exception:
+    # Non-fatal: if python-dotenv isn't available or loading fails, we'll
+    # continue and allow explicit environment variables to be used.
+    pass
 
 try:
     import pandas as pd
@@ -34,38 +45,7 @@ def majority_baseline(labels: List[str]):
     return majority, acc
 
 
-def main(argv=None):
-    p = argparse.ArgumentParser()
-    p.add_argument('--data', required=True, help='Path to Parquet or JSONL file (Parquet recommended)')
-    args = p.parse_args(argv)
 
-    if args.data.endswith('.parquet'):
-        df = load_parquet(args.data)
-        # Expect winner column
-        labels = df['winner'].tolist() if 'winner' in df.columns else []
-    else:
-        # simple JSONL loader
-        labels = []
-        with open(args.data, 'r') as f:
-            for line in f:
-                try:
-                    obj = json.loads(line)
-                    if 'winner' in obj:
-                        labels.append(obj['winner'])
-                except Exception:
-                    continue
-
-    if not labels:
-        print('No labels found in dataset')
-        return 2
-
-    majority, acc = majority_baseline(labels)
-    print(f'Majority label: {majority}, accuracy on full set: {acc:.3f}')
-    return 0
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())
 """
 Complete Training Pipeline for Unit Game AI
 
@@ -123,7 +103,6 @@ from neural_network_model import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class TrainingConfig:
     """Configuration for training pipeline."""
@@ -143,6 +122,10 @@ class TrainingConfig:
     # Model
     num_vertices: int = 83
     checkpoint_dir: str = 'checkpoints'
+    # Optional local shard/parquet input directory to train from instead of DB
+    data_dir: str = None
+    # Data loader workers for PyTorch DataLoader - helps prefetch shards
+    data_loader_workers: int = 4
     
     # Evaluation
     eval_games: int = 100
@@ -156,7 +139,7 @@ class GameDataset(Dataset):
         """
         Args:
             states: [N, num_vertices, 5] game states
-            moves: [N] class indices (policy target indices in range num_vertices*4)
+            moves: [N] class indices (policy target indices in range num_vertices*5)
             outcomes: [N] game outcomes (-1, 0, 1)
         """
         self.states = torch.FloatTensor(states)
@@ -211,8 +194,9 @@ class DataLoader:
         This avoids loading all games into memory at once. It uses LIMIT/OFFSET
         pagination; for very large tables consider server-side cursors.
         """
+        # Include initial_state from games table (used when state_serialization='none')
         base_query = """
-            SELECT g.game_id, g.winner, g.total_moves,
+            SELECT g.game_id, g.winner, g.total_moves, g.initial_state,
                    array_agg(
                        json_build_object(
                            'move_number', m.move_number,
@@ -243,6 +227,8 @@ class DataLoader:
                         'game_id': row['game_id'],
                         'winner': row['winner'],
                         'total_moves': row['total_moves'],
+                        # initial_state may be stored as JSON/text
+                        'initial_state': row.get('initial_state'),
                         'moves': row['moves']
                     })
 
@@ -271,37 +257,84 @@ class TrainingDataProcessor:
         
         Returns:
             states: [N, num_vertices, 5] - game states
-            policies: [N] - policy class indices (int in [0, num_vertices*4))
+            policies: [N] - policy class indices (int in [0, num_vertices*5))
             values: [N] - game outcomes
         """
         states = []
         policies = []
         values = []
-        
+
         for game in games:
-            game_outcome = self._outcome_to_value(game['winner'])
-            
-            for move_data in game['moves']:
-                # Parse state_before from move data
-                state = self._parse_state(move_data)
-                if state is None:
+            game_outcome = self._outcome_to_value(game.get('winner'))
+
+            # Load and parse initial state. Support both JSON/text and already-parsed dict.
+            initial = game.get('initial_state')
+            if initial is None:
+                # Fall back to per-move state_before (older exports) by trying to parse the first move
+                logger.warning(f"Game {game.get('game_id')} missing initial_state; attempting per-move parsing")
+                # We'll still try the old per-move flow
+                for move_data in game.get('moves', []):
+                    # Normalize move_data: DB may return JSON strings for moves
+                    if isinstance(move_data, str):
+                        try:
+                            move_data = json.loads(move_data)
+                        except Exception:
+                            continue
+                    state = self._parse_state(move_data)
+                    if state is None:
+                        continue
+                    state_tensor = state_to_tensor(state, self.num_vertices)
+                    policy_idx = self._move_to_policy(move_data, state)
+                    if policy_idx is None or policy_idx < 0:
+                        continue
+                    player = move_data.get('player_id') or move_data.get('player')
+                    outcome = game_outcome if player == game.get('winner') else -game_outcome
+                    states.append(state_tensor)
+                    policies.append(policy_idx)
+                    values.append(outcome)
+                continue
+
+            if isinstance(initial, str):
+                try:
+                    current_state = json.loads(initial)
+                except Exception:
+                    logger.warning(f"Failed to parse initial_state for game {game.get('game_id')}")
                     continue
-                
-                # Convert state to tensor
-                state_tensor = state_to_tensor(state, self.num_vertices)
-                states.append(state_tensor)
-                
-                # Convert move to policy target (class index)
-                policy_idx = self._move_to_policy(move_data, state)
-                # skip if we couldn't derive a valid action index
+            else:
+                # assume dict-like
+                current_state = copy.deepcopy(initial)
+
+            # Re-simulate the game: for each move, yield (state_before, policy_target, outcome)
+            for move_data in game.get('moves', []):
+                # Normalize move_data in case DB returned JSON strings
+                if isinstance(move_data, str):
+                    try:
+                        move_data = json.loads(move_data)
+                    except Exception:
+                        # skip malformed move entry
+                        continue
+                # Ensure action_data is parsed when needed inside helpers
+                try:
+                    state_tensor = state_to_tensor(current_state, self.num_vertices)
+                except Exception as e:
+                    logger.warning(f"state_to_tensor failed for game {game.get('game_id')}: {e}")
+                    break
+
+                policy_idx = self._move_to_policy(move_data, current_state)
                 if policy_idx is None or policy_idx < 0:
+                    # Still advance the state to keep alignment
+                    self._apply_move(current_state, move_data)
                     continue
-                policies.append(policy_idx)
-                
-                # Flip outcome based on whose turn it was
-                player = move_data['player_id']
-                outcome = game_outcome if player == game['winner'] else -game_outcome
-                values.append(outcome)
+
+                player = move_data.get('player_id') or move_data.get('player')
+                outcome = game_outcome if player == game.get('winner') else -game_outcome
+
+                states.append(state_tensor)
+                policies.append(int(policy_idx))
+                values.append(float(outcome))
+
+                # advance state to reflect the move we just processed
+                self._apply_move(current_state, move_data)
         
         logger.info(f"Processed {len(states)} training examples from {len(games)} games")
         
@@ -315,7 +348,16 @@ class TrainingDataProcessor:
         """Parse game state from move data."""
         # Extract and parse action_data and the serialized state_before
         try:
+            # Some exports store the entire move as a JSON string; handle that here
+            if isinstance(move_data, str):
+                try:
+                    move_data = json.loads(move_data)
+                except Exception:
+                    return None
             action_data = move_data.get('action_data', {})
+            # some exports use 'action' as the nested key
+            if not action_data:
+                action_data = move_data.get('action', action_data)
             if isinstance(action_data, str):
                 action_data = json.loads(action_data)
 
@@ -331,16 +373,124 @@ class TrainingDataProcessor:
         except Exception as e:
             logger.warning(f"Failed to parse state: {e}")
             return None
+
+    def _apply_move(self, state: Dict, move_data: Dict) -> None:
+        """Apply a single move to `state` in-place.
+
+        This is a lightweight, best-effort re-simulation used only to rebuild
+        the sequence of states during training. It intentionally implements
+        the minimum necessary effects so that `state_to_tensor` remains
+        meaningful (stacks, ownership, currentPlayerId, basic movement).
+        """
+        try:
+            # Defensive: if move_data is not a dict or JSON string, skip it
+            if not isinstance(move_data, (dict, str)):
+                logger.debug(f"_apply_move received unexpected move_data type {type(move_data)}; skipping")
+                return
+
+            # Support move_data being a JSON string from DB exports
+            if isinstance(move_data, str):
+                try:
+                    move_data = json.loads(move_data)
+                except Exception:
+                    # malformed move_data string — skip applying
+                    return
+            action_data = move_data.get('action_data', {})
+            # some exports use 'action' as the nested key
+            if not action_data:
+                action_data = move_data.get('action', action_data)
+            if isinstance(action_data, str):
+                action_data = json.loads(action_data)
+
+            action_type = action_data.get('type') or move_data.get('action_type')
+            player = move_data.get('player_id') or move_data.get('player')
+
+            vertices = state.setdefault('vertices', {})
+
+            def ensure_vertex(v_id):
+                if v_id not in vertices:
+                    vertices[v_id] = {'stack': [], 'energy': 0, 'layer': 0}
+                # Ensure proper defaults
+                v = vertices[v_id]
+                v.setdefault('stack', [])
+                v.setdefault('energy', 0)
+                v.setdefault('layer', 0)
+                return v
+
+            if action_type == 'place':
+                to_id = action_data.get('vertexId') or action_data.get('toId')
+                if to_id:
+                    v = ensure_vertex(to_id)
+                    # place a minimal unit record (ownership is key for state_to_tensor)
+                    v['stack'].insert(0, {'player': player})
+
+            elif action_type == 'move':
+                from_id = action_data.get('fromId') or action_data.get('vertexId')
+                to_id = action_data.get('toId')
+                if from_id and to_id and from_id in vertices:
+                    src = vertices[from_id]
+                    if src.get('stack'):
+                        piece = src['stack'].pop(0)
+                        dst = ensure_vertex(to_id)
+                        dst['stack'].insert(0, piece)
+
+            elif action_type == 'attack':
+                # Simplified: remove top opposing piece at target if exists
+                target_id = action_data.get('targetId') or action_data.get('vertexId') or action_data.get('toId')
+                if target_id and target_id in vertices and vertices[target_id].get('stack'):
+                    top = vertices[target_id]['stack'][0]
+                    if top.get('player') != player:
+                        vertices[target_id]['stack'].pop(0)
+
+            elif action_type == 'infuse':
+                # infuse may change energy on a vertex
+                vid = action_data.get('vertexId') or action_data.get('toId')
+                amount = action_data.get('amount') or 0
+                if vid:
+                    v = ensure_vertex(vid)
+                    try:
+                        v['energy'] = max(0, v.get('energy', 0) + int(amount))
+                    except Exception:
+                        pass
+
+            # pincer and other types: best-effort no-op to keep simulation deterministic
+
+            # Toggle current player if present in state
+            cur = state.get('currentPlayerId')
+            if cur is not None and player is not None:
+                # attempt a simple flip for canonical two-player ids like 'Player1'/'Player2'
+                if isinstance(cur, str) and cur.startswith('Player'):
+                    state['currentPlayerId'] = 'Player2' if cur == 'Player1' else 'Player1'
+                else:
+                    # if not textual, try to infer from player in move
+                    state['currentPlayerId'] = player
+
+        except Exception as e:
+            logger.debug(f"_apply_move failed on move {move_data.get('move_number')}: {e}")
     
     def _move_to_policy(self, move_data: Dict, state: Dict) -> np.ndarray:
         """
-        Convert move to a single class index in range [0, num_vertices*4).
+    Convert move to a single class index in range [0, num_vertices*5).
 
-        Index layout: vertex_idx * 4 + action_offset
+    Index layout: vertex_idx * 5 + action_offset
         Returns integer index, or None if it can't be derived.
         """
         try:
+            # Defensive: only handle dicts or JSON strings
+            if not isinstance(move_data, (dict, str)):
+                logger.debug(f"_move_to_policy received unexpected move_data type {type(move_data)}; skipping")
+                return None
+
+            # Accept move_data as JSON string or dict
+            if isinstance(move_data, str):
+                try:
+                    move_data = json.loads(move_data)
+                except Exception:
+                    return None
             action_data = move_data.get('action_data', {})
+            # accept either 'action_data' or 'action'
+            if not action_data:
+                action_data = move_data.get('action', action_data)
             if isinstance(action_data, str):
                 action_data = json.loads(action_data)
 
@@ -356,13 +506,14 @@ class TrainingDataProcessor:
                 'place': 0,
                 'infuse': 1,
                 'move': 2,
-                'attack': 3
+                'attack': 3,
+                'pincer': 4
             }.get(action_type, None)
 
             if action_offset is None:
                 return None
 
-            return int(vertex_idx * 4 + action_offset)
+            return int(vertex_idx * 5 + action_offset)
         except Exception as e:
             logger.warning(f"Failed to convert move to policy: {e}")
             return None
@@ -410,7 +561,8 @@ class TrainingPipeline:
         logger.info(f"Generating {self.config.games_to_generate} games via self-play...")
         
         # Import and run self-play system
-        from self_play_system import SelfPlayConfig, SelfPlayGenerator
+        from self_play.config import SelfPlayConfig
+        from self_play.self_play_generator import SelfPlayGenerator
         
         selfplay_config = SelfPlayConfig(
             games_per_batch=self.config.games_to_generate,
@@ -432,10 +584,7 @@ class TrainingPipeline:
         """Train neural network on database game data."""
         logger.info("Streaming training data from database and sharding to disk...")
 
-        # Connect to database
-        await self.data_loader.connect()
-
-        # Buffers to accumulate examples before writing compressed shard files
+    # Buffers to accumulate examples before writing compressed shard files
         train_buf_states = []
         train_buf_policies = []
         train_buf_values = []
@@ -451,21 +600,110 @@ class TrainingPipeline:
 
         buffer_limit = max(self.config.batch_size * 200, 10000)
 
-        # Stream games from DB in batches and process incrementally
-        async for games_batch in self.data_loader.load_games(batch_size=1000, limit=None):
-            states, policies, values = self.processor.process_games(games_batch)
-            if len(states) == 0:
-                continue
+        # If a local data_dir is provided, read parquet/jsonl files from it
+        if getattr(self.config, 'data_dir', None):
+            logger.info("Reading training data from local directory: %s", self.config.data_dir)
+            # find parquet files first
+            files = sorted(glob.glob(os.path.join(self.config.data_dir, '*.parquet')))
+            # also accept jsonl files
+            files += sorted(glob.glob(os.path.join(self.config.data_dir, '*.jsonl')))
 
-            for i in range(len(states)):
-                if random.random() < self.config.train_test_split:
-                    train_buf_states.append(states[i])
-                    train_buf_policies.append(int(policies[i]))
-                    train_buf_values.append(float(values[i]))
-                else:
-                    test_buf_states.append(states[i])
-                    test_buf_policies.append(int(policies[i]))
-                    test_buf_values.append(float(values[i]))
+            if not files:
+                raise RuntimeError(f"No parquet/jsonl files found in {self.config.data_dir}")
+
+            for fpath in files:
+                try:
+                    if fpath.endswith('.parquet'):
+                        if pd is None:
+                            raise RuntimeError('pandas required to read parquet files')
+                        df = pd.read_parquet(fpath)
+                        rows = df.to_dict(orient='records')
+                    else:
+                        # jsonl
+                        rows = []
+                        with open(fpath, 'r') as fh:
+                            for line in fh:
+                                try:
+                                    rows.append(json.loads(line))
+                                except Exception:
+                                    continue
+
+                    # normalize rows to 'games' format expected by processor
+                    games_batch = []
+                    for r in rows:
+                        moves_val = r.get('moves') or r.get('moves_list') or []
+                        # If the entire moves column is a JSON-serialized list, parse it
+                        if isinstance(moves_val, str):
+                            try:
+                                moves_val = json.loads(moves_val)
+                            except Exception:
+                                # leave as string; processor will handle per-entry JSON strings
+                                pass
+
+                        game = {
+                            'game_id': r.get('game_id') or r.get('id') or None,
+                            'winner': r.get('winner'),
+                            'total_moves': r.get('total_moves') or r.get('moves_count') or None,
+                            'initial_state': r.get('initial_state'),
+                            'moves': moves_val
+                        }
+                        games_batch.append(game)
+
+                    states, policies, values = self.processor.process_games(games_batch)
+                    if len(states) == 0:
+                        continue
+
+                    for i in range(len(states)):
+                        if random.random() < self.config.train_test_split:
+                            train_buf_states.append(states[i])
+                            train_buf_policies.append(int(policies[i]))
+                            train_buf_values.append(float(values[i]))
+                        else:
+                            test_buf_states.append(states[i])
+                            test_buf_policies.append(int(policies[i]))
+                            test_buf_values.append(float(values[i]))
+
+                    # Flush buffers periodically per file to avoid huge memory use
+                    if len(train_buf_states) >= buffer_limit:
+                        shard_path = os.path.join(self.config.checkpoint_dir, f'train_shard_{shard_counter["train"]}.npz')
+                        np.savez_compressed(shard_path,
+                                            states=np.array(train_buf_states),
+                                            policies=np.array(train_buf_policies, dtype=np.int64),
+                                            values=np.array(train_buf_values, dtype=np.float32))
+                        train_shards.append(shard_path)
+                        shard_counter['train'] += 1
+                        train_buf_states.clear(); train_buf_policies.clear(); train_buf_values.clear()
+
+                    if len(test_buf_states) >= buffer_limit:
+                        shard_path = os.path.join(self.config.checkpoint_dir, f'test_shard_{shard_counter["test"]}.npz')
+                        np.savez_compressed(shard_path,
+                                            states=np.array(test_buf_states),
+                                            policies=np.array(test_buf_policies, dtype=np.int64),
+                                            values=np.array(test_buf_values, dtype=np.float32))
+                        test_shards.append(shard_path)
+                        shard_counter['test'] += 1
+                        test_buf_states.clear(); test_buf_policies.clear(); test_buf_values.clear()
+                except Exception as e:
+                    logger.warning("Failed to process data file %s: %s", fpath, e)
+        else:
+            # Connect to database
+            await self.data_loader.connect()
+
+            # Stream games from DB in batches and process incrementally
+            async for games_batch in self.data_loader.load_games(batch_size=1000, limit=None):
+                states, policies, values = self.processor.process_games(games_batch)
+                if len(states) == 0:
+                    continue
+
+                for i in range(len(states)):
+                    if random.random() < self.config.train_test_split:
+                        train_buf_states.append(states[i])
+                        train_buf_policies.append(int(policies[i]))
+                        train_buf_values.append(float(values[i]))
+                    else:
+                        test_buf_states.append(states[i])
+                        test_buf_policies.append(int(policies[i]))
+                        test_buf_values.append(float(values[i]))
 
             # Flush train buffer to shard
             if len(train_buf_states) >= buffer_limit:
@@ -526,12 +764,16 @@ class TrainingPipeline:
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=self.config.batch_size,
-            shuffle=False
+            shuffle=False,
+            num_workers=getattr(self.config, 'data_loader_workers', 0),
+            pin_memory=True
         )
         test_loader = torch.utils.data.DataLoader(
             test_dataset,
             batch_size=self.config.batch_size,
-            shuffle=False
+            shuffle=False,
+            num_workers=getattr(self.config, 'data_loader_workers', 0),
+            pin_memory=True
         )
 
         # Training loop
@@ -598,7 +840,14 @@ class TrainingPipeline:
 
         with torch.no_grad():
             for batch_states, batch_policies, batch_values in test_loader:
-                policy_pred, value_pred = self.model(batch_states.to(self.trainer.device))
+                # Ensure input is float32 on the correct device (prevent double/float mismatch)
+                bs = batch_states
+                if hasattr(bs, 'to'):
+                    bs = bs.to(self.trainer.device)
+                else:
+                    bs = torch.as_tensor(bs, device=self.trainer.device)
+                bs = bs.float()
+                policy_pred, value_pred = self.model(bs)
 
                 policy_loss = torch.nn.functional.cross_entropy(
                     policy_pred,
@@ -644,6 +893,7 @@ async def main():
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--model', type=str, help='Model checkpoint path')
     parser.add_argument('--db-url', type=str, help='Database URL')
+    parser.add_argument('--data-dir', type=str, help='Directory of Parquet/JSONL shards to train from (bypass DB)')
     
     args = parser.parse_args()
     
@@ -655,6 +905,9 @@ async def main():
         batch_size=args.batch_size,
         database_url=args.db_url or os.getenv('DATABASE_URL', 'postgresql://user:pass@localhost/unitgame')
     )
+    # allow data-dir from CLI to override config when provided
+    if getattr(args, 'data_dir', None):
+        config.data_dir = args.data_dir
     
     pipeline = TrainingPipeline(config)
     
