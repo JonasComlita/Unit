@@ -1064,20 +1064,21 @@ class SelfPlayGenerator:
                             moves.append({'type': 'move', 'fromId': vid, 'toId': target_id})
         
         # Attack moves
-        for vid, vertex in vertices.items():
-            if vertex['stack'] and vertex['stack'][0]['player'] == current_player:
-                if len(vertex['stack']) >= 1 and vertex['energy'] >= 1:
-                    for target_id in vertex['adjacencies']:
-                        target = vertices[target_id]
-                        if target['stack'] and target['stack'][0]['player'] != current_player:
-                            moves.append({'type': 'attack', 'vertexId': vid, 'targetId': target_id})
+        if not turn['hasMoved']:
+            for vid, vertex in vertices.items():
+                if vertex['stack'] and vertex['stack'][0]['player'] == current_player:
+                    if len(vertex['stack']) >= 1 and vertex['energy'] >= 1:
+                        for target_id in vertex['adjacencies']:
+                            target = vertices[target_id]
+                            if target['stack'] and target['stack'][0]['player'] != current_player:
+                                moves.append({'type': 'attack', 'vertexId': vid, 'targetId': target_id})
 
-        # Pincer moves (special multi-target attack) - available when vertex has enough energy
-        for vid, vertex in vertices.items():
-            if vertex['stack'] and vertex['stack'][0]['player'] == current_player and vertex.get('energy', 0) >= 2:
-                adjacent_enemies = [t for t in vertex['adjacencies'] if vertices[t]['stack'] and vertices[t]['stack'][0]['player'] != current_player]
-                for target_id in adjacent_enemies:
-                    moves.append({'type': 'pincer', 'vertexId': vid, 'targetId': target_id})
+            # Pincer moves (special multi-target attack) - available when vertex has enough energy
+            for vid, vertex in vertices.items():
+                if vertex['stack'] and vertex['stack'][0]['player'] == current_player and vertex.get('energy', 0) >= 2:
+                    adjacent_enemies = [t for t in vertex['adjacencies'] if vertices[t]['stack'] and vertices[t]['stack'][0]['player'] != current_player]
+                    for target_id in adjacent_enemies:
+                        moves.append({'type': 'pincer', 'vertexId': vid, 'targetId': target_id})
         
         # End turn (if mandatory actions done)
         if turn['hasPlaced'] and turn['hasInfused'] and turn['hasMoved']:
@@ -1141,11 +1142,55 @@ class SelfPlayGenerator:
                 # Attacker wins: defender gets attacker's pieces
                 defender['stack'] = attacker['stack']
                 defender['energy'] = max(0, attacker['energy'] - defender['energy'])
-            else:
-                # Defender wins or draw: defender keeps position
+            elif defender_strength > attacker_strength:
+                # Defender wins: defender keeps position
                 defender['energy'] = max(0, defender['energy'] - attacker['energy'])
-            
-            # Attacker position is emptied
+            else:
+                # Draw / Equal Force: both stay at original positions with reduced stats
+                # Attacker stays at source (attacker_id)
+                att_pieces = len(attacker['stack'])
+                def_pieces = len(defender['stack'])
+                att_energy = attacker['energy']
+                def_energy = defender['energy']
+
+                # Update Attacker
+                new_att_pieces = max(0, att_pieces - def_pieces)
+                new_att_energy = max(0, att_energy - def_energy)
+                
+                if new_att_pieces > 0:
+                    # Rebuild stack with correct owner
+                    attacker['stack'] = [{'player': current_player, 'id': f'p_draw_att_{i}'} for i in range(new_att_pieces)]
+                    attacker['energy'] = new_att_energy
+                else:
+                    attacker['stack'] = []
+                    attacker['energy'] = 0
+
+                # Update Defender
+                new_def_pieces = max(0, def_pieces - att_pieces)
+                new_def_energy = max(0, def_energy - att_energy)
+                
+                defender_owner = defender['stack'][0]['player'] if defender['stack'] else 'Player2' # Fallback shouldn't happen if occupied
+                
+                if new_def_pieces > 0:
+                    defender['stack'] = [{'player': defender_owner, 'id': f'p_draw_def_{i}'} for i in range(new_def_pieces)]
+                    defender['energy'] = new_def_energy
+                else:
+                    defender['stack'] = []
+                    defender['energy'] = 0
+                
+                # Return early to avoid the common "Attacker position is emptied" block below
+                # But we still need to end the turn.
+                new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
+                new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
+                new_state['turn'] = {
+                    'hasPlaced': False,
+                    'hasInfused': False,
+                    'hasMoved': False,
+                    'turnNumber': new_state['turn']['turnNumber'] + 1
+                }
+                return new_state
+
+            # Common cleanup for Win/Loss cases (Attacker leaves source)
             attacker['stack'] = []
             attacker['energy'] = 0
             

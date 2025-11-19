@@ -278,3 +278,52 @@ export const checkWinner = (state: GameState): PlayerId | null => {
     }
     return null;
 };
+
+export interface CombatResult {
+    outcome: 'attacker_win' | 'defender_win' | 'draw';
+    attacker: { pieces: number; energy: number };
+    defender: { pieces: number; energy: number };
+}
+
+export const resolveCombat = (attacker: Vertex, defender: Vertex): CombatResult => {
+    const attForce = getForce(attacker);
+    const defForce = getForce(defender);
+
+    const attPieces = attacker.stack.length;
+    const defPieces = defender.stack.length;
+    const attEnergy = attacker.energy;
+    const defEnergy = defender.energy;
+
+    if (attForce > defForce) {
+        return {
+            outcome: 'attacker_win',
+            attacker: {
+                pieces: Math.abs(attPieces - defPieces),
+                energy: Math.abs(attEnergy - defEnergy)
+            },
+            defender: { pieces: 0, energy: 0 }
+        };
+    } else if (defForce > attForce) {
+        return {
+            outcome: 'defender_win',
+            attacker: { pieces: 0, energy: 0 },
+            defender: {
+                pieces: Math.abs(defPieces - attPieces),
+                energy: Math.abs(defEnergy - attEnergy)
+            }
+        };
+    } else {
+        // Draw / Equal Force
+        return {
+            outcome: 'draw',
+            attacker: {
+                pieces: Math.max(0, attPieces - defPieces),
+                energy: Math.max(0, attEnergy - defEnergy)
+            },
+            defender: {
+                pieces: Math.max(0, defPieces - attPieces),
+                energy: Math.max(0, defEnergy - attEnergy)
+            }
+        };
+    }
+};
