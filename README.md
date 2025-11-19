@@ -109,6 +109,35 @@ The ultimate goal is to eliminate all of the opponent's pieces from the board. A
 
 ---
 
+### Basic Macro Strategies
+
+### 1. The Economy of Force
+- **Efficiency**: Since `Force = (Pieces * Energy) / Gravity`, and Gravity increases towards the center (Layers 1, 2, 3), your units are most efficient on the top and bottom layers (Layers 0 and 4). Fighting in the center requires significantly more investment.
+- **Occupation Thresholds**: Memorize the `P * E` (Pieces times Energy) targets to make a vertex "occupied" (able to attack):
+	- **3x3 Layers**: `P * E >= 1` (Easy)
+	- **5x5 Layers**: `P * E >= 8` (Moderate)
+	- **7x7 Layer**: `P * E >= 27` (Hard)
+
+### 2. Combat Arithmetic
+- **Overwhelming Victory**: Combat is attritional. If you attack a stack of 5 pieces with 6 pieces, you win but are left with only 1 piece. Always aim to attack with significantly more pieces than your opponent to preserve your army size.
+- **Energy Conservation**: Similar to pieces, you keep the difference in energy. High-energy units are valuable; protect them from attrition by low-energy enemy spam.
+
+### 3. Positioning and Movement
+- **The Pincer Maneuver**: Pincer attacks multiply the force of all attacking stacks. This is the only way to defeat a fully fortified "Death Star" stack (Force 10) without sacrificing your own massive stack. Position multiple small stacks to surround and eliminate large threats.
+- **Stacking**: You can move onto your own pieces to merge stacks. Use this to ferry reinforcements from your spawn point to the front lines.
+- **Home Defense**: You lose if the opponent occupies your home corners. Never leave them completely vulnerable while pushing for an offensive.
+
+### 4. Opening Moves
+- **Corner Rush**: Quickly expanding on your home layer (3x3) is cheap. Securing your layer gives you a platform to launch attacks into the expensive center layers.
+- **The Deep Strike**: Building a single massive stack to punch through the high-gravity center can catch an opponent off guard, but it's a high-risk "all-in" strategy.
+
+### 5. Advanced Tactics
+- **Kamikaze / Suicide Bomber**: Sometimes it is worth making a losing attack to whittle down an opponent's vertex. Even if you lose the battle, the attrition mechanic means the defender loses pieces equal to your army size. Use this to soften up a strong enemy before a final killing blow.
+- **Banking / Storing**: The center layers (Layers 1, 2, 3) have higher gravity, which means they can hold more pieces and energy before hitting the Force Cap of 10. Use these high-gravity zones as "vaults" to store massive armies that would otherwise be capped on the outer layers.
+- **The Spread**: The opposite of banking. Spreading your pieces and energy across as many vertices as possible increases your board control and sets up opportunities for **Pincer Attacks**. A wide net allows you to catch enemy units in crossfires.
+
+---
+
 # Running Self-Play and Training
 
 ## 1. Generate Self-Play Data
@@ -146,30 +175,4 @@ To run the full pipeline (generate data, train, and evaluate):
 python training_pipeline.py full --games 10000 --epochs 50
 ```
 
-
-### Basic Macro Strategies
-
-### 1. The Economy of Force
-- **Efficiency**: Since `Force = (Pieces * Energy) / Gravity`, and Gravity increases towards the center (Layers 1, 2, 3), your units are most efficient on the top and bottom layers (Layers 0 and 4). Fighting in the center requires significantly more investment.
-- **Occupation Thresholds**: Memorize the `P * E` (Pieces times Energy) targets to make a vertex "occupied" (able to attack):
-	- **3x3 Layers**: `P * E >= 1` (Easy)
-	- **5x5 Layers**: `P * E >= 8` (Moderate)
-	- **7x7 Layer**: `P * E >= 27` (Hard)
-
-### 2. Combat Arithmetic
-- **Overwhelming Victory**: Combat is attritional. If you attack a stack of 5 pieces with 6 pieces, you win but are left with only 1 piece. Always aim to attack with significantly more pieces than your opponent to preserve your army size.
-- **Energy Conservation**: Similar to pieces, you keep the difference in energy. High-energy units are valuable; protect them from attrition by low-energy enemy spam.
-
-### 3. Positioning and Movement
-- **The Pincer Maneuver**: Pincer attacks multiply the force of all attacking stacks. This is the only way to defeat a fully fortified "Death Star" stack (Force 10) without sacrificing your own massive stack. Position multiple small stacks to surround and eliminate large threats.
-- **Stacking**: You can move onto your own pieces to merge stacks. Use this to ferry reinforcements from your spawn point to the front lines.
-- **Home Defense**: You lose if the opponent occupies your home corners. Never leave them completely vulnerable while pushing for an offensive.
-
-### 4. Opening Moves
-- **Corner Rush**: Quickly expanding on your home layer (3x3) is cheap. Securing your layer gives you a platform to launch attacks into the expensive center layers.
-- **The Deep Strike**: Building a single massive stack to punch through the high-gravity center can catch an opponent off guard, but it's a high-risk "all-in" strategy.
-
-### 5. Advanced Tactics
-- **Kamikaze / Suicide Bomber**: Sometimes it is worth making a losing attack to whittle down an opponent's vertex. Even if you lose the battle, the attrition mechanic means the defender loses pieces equal to your army size. Use this to soften up a strong enemy before a final killing blow.
-- **Banking / Storing**: The center layers (Layers 1, 2, 3) have higher gravity, which means they can hold more pieces and energy before hitting the Force Cap of 10. Use these high-gravity zones as "vaults" to store massive armies that would otherwise be capped on the outer layers.
-- **The Spread**: The opposite of banking. Spreading your pieces and energy across as many vertices as possible increases your board control and sets up opportunities for **Pincer Attacks**. A wide net allows you to catch enemy units in crossfires.
+---

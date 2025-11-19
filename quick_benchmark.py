@@ -1,20 +1,19 @@
 """
-Small benchmark harness to pit agents against each other for quick smoke tests.
-Usage (python -m self_play.benchmark or run file):
-    from self_play import random_algorithm, greedy_algorithm, a_star_algorithm
-
-This script runs short games and reports basic win stats.
+Simplified benchmark - just greedy variants without A*
 """
 import time
 from typing import Callable
+import sys
 
-from .agent_utils import initialize_game, apply_move, get_legal_moves
-from .random_algorithm import select_move as random_select
-from .greedy_algorithm import select_move as greedy_select
-from .a_star_algorithm import select_move as a_star_select
-from .greedy_banker import select_move as banker_select
-from .greedy_spreader import select_move as spreader_select
-from .greedy_aggressor import select_move as aggressor_select
+# Add parent directory to path for imports
+sys.path.insert(0, '.')
+
+from self_play.agent_utils import initialize_game, apply_move, get_legal_moves
+from self_play.random_algorithm import select_move as random_select
+from self_play.greedy_algorithm import select_move as greedy_select
+from self_play.greedy_banker import select_move as banker_select
+from self_play.greedy_spreader import select_move as spreader_select
+from self_play.greedy_aggressor import select_move as aggressor_select
 
 
 AgentFn = Callable[[dict], dict]
@@ -64,7 +63,7 @@ def benchmark(agent_a: AgentFn, agent_b: AgentFn, rounds: int = 20):
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("Running comprehensive benchmarks")
+    print("Running Greedy Variants Benchmarks (No A*)")
     print("=" * 60)
     
     print("\n--- Random vs Greedy Variants ---")
@@ -80,19 +79,6 @@ if __name__ == '__main__':
     print("\nRandom vs Aggressor:")
     benchmark(random_select, aggressor_select, rounds=10)
     
-    print("\n--- Greedy Variants vs A* ---")
-    print("\nGreedy (basic) vs A*:")
-    benchmark(greedy_select, a_star_select, rounds=6)
-    
-    print("\nBanker vs A*:")
-    benchmark(banker_select, a_star_select, rounds=6)
-    
-    print("\nSpreader vs A*:")
-    benchmark(spreader_select, a_star_select, rounds=6)
-    
-    print("\nAggressor vs A*:")
-    benchmark(aggressor_select, a_star_select, rounds=6)
-    
     print("\n--- Greedy Variants vs Each Other ---")
     print("\nBanker vs Spreader:")
     benchmark(banker_select, spreader_select, rounds=8)
@@ -103,7 +89,15 @@ if __name__ == '__main__':
     print("\nSpreader vs Aggressor:")
     benchmark(spreader_select, aggressor_select, rounds=8)
     
+    print("\nGreedy (basic) vs Banker:")
+    benchmark(greedy_select, banker_select, rounds=8)
+    
+    print("\nGreedy (basic) vs Spreader:")
+    benchmark(greedy_select, spreader_select, rounds=8)
+    
+    print("\nGreedy (basic) vs Aggressor:")
+    benchmark(greedy_select, aggressor_select, rounds=8)
+    
     print("\n" + "=" * 60)
     print("Benchmark complete!")
     print("=" * 60)
-
