@@ -17,9 +17,9 @@ export const isOccupied = (vertex: Vertex, requirementLayer?: number): boolean =
     const layerToCheck = requirementLayer ?? vertex.layer;
     const req = getOccupationRequirement(layerToCheck);
     const force = getForce(vertex);
-    return vertex.stack.length >= req.minPieces && 
-           vertex.energy >= req.minEnergy && 
-           force >= req.minForce;
+    return vertex.stack.length >= req.minPieces &&
+        vertex.energy >= req.minEnergy &&
+        force >= req.minForce;
 };
 
 // Replace the getAdjacencies function in gameLogic.ts
@@ -59,7 +59,7 @@ export const getAdjacencies = (
             for (let tx = 0; tx < targetSize; tx++) {
                 for (let tz = 0; tz < targetSize; tz++) {
                     const targetVertex = layerGrid[targetLayer][tx][tz];
-                    
+
                     // Calculate XZ distance (ignore Y since layers are at different heights)
                     const dx = targetVertex.position.x - position.x;
                     const dz = targetVertex.position.z - position.z;
@@ -86,7 +86,7 @@ export const getAdjacencies = (
 
 export const initializeGameState = (): GameState => {
     const initialVertices: Record<string, Vertex> = {};
-    const layerGrid: Vertex[][][] = boardLayout.map(size => 
+    const layerGrid: Vertex[][][] = boardLayout.map(size =>
         Array(size).fill(0).map(() => [])
     );
     let vertexIdCounter = 0;
@@ -101,8 +101,8 @@ export const initializeGameState = (): GameState => {
             for (let z = 0; z < size; z++) {
                 const id = `vertex-${vertexIdCounter++}`;
                 const pos = new Vector3(
-                    (x - offset) * vertexSpacing, 
-                    layerY, 
+                    (x - offset) * vertexSpacing,
+                    layerY,
                     (z - offset) * vertexSpacing
                 );
                 // vertex initialization
@@ -134,7 +134,7 @@ export const initializeGameState = (): GameState => {
     const minZ = Math.min(...bottomLayer.map(v => v.position.z));
     const maxX = Math.max(...bottomLayer.map(v => v.position.x));
     const maxZ = Math.max(...bottomLayer.map(v => v.position.z));
-    
+
     const p1BottomCorner = bottomLayer.find(v => v.position.x === minX && v.position.z === minZ);
     const p2BottomCorner = bottomLayer.find(v => v.position.x === maxX && v.position.z === maxZ);
     const p1TopCorner = topLayer.find(v => v.position.x === minX && v.position.z === minZ);
@@ -142,15 +142,15 @@ export const initializeGameState = (): GameState => {
 
     return {
         vertices: initialVertices,
-        players: { 
-            Player1: { id: 'Player1', reinforcements: GAME_RULES.initialReinforcements }, 
-            Player2: { id: 'Player2', reinforcements: GAME_RULES.initialReinforcements } 
+        players: {
+            Player1: { id: 'Player1', reinforcements: GAME_RULES.initialReinforcements },
+            Player2: { id: 'Player2', reinforcements: GAME_RULES.initialReinforcements }
         },
         currentPlayerId: 'Player1',
-    turn: { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: 1 },
-        homeCorners: { 
-            Player1: [p1BottomCorner!.id, p1TopCorner!.id], 
-            Player2: [p2BottomCorner!.id, p2TopCorner!.id] 
+        turn: { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: 1 },
+        homeCorners: {
+            Player1: [p1BottomCorner!.id, p1TopCorner!.id],
+            Player2: [p2BottomCorner!.id, p2TopCorner!.id]
         },
         winner: null,
         selectedVertexId: null,
@@ -198,24 +198,21 @@ export const calculateValidActions = (state: GameState): Partial<GameState> => {
         updates.validMoveOrigins = Object.values(vertices)
             .filter(v => v.stack.length > 0 && v.stack[0].player === currentPlayerId)
             .map(v => v.id);
-        if (DEBUG_MOVE) console.debug('[calculateValidActions] validMoveOrigins=', updates.validMoveOrigins);
     }
-    
+
     // Attack & Move Targets
     if (selectedVertexId) {
         const selectedVertex = vertices[selectedVertexId];
-        if (DEBUG_MOVE) console.debug('[calculateValidActions] selectedVertexId=', selectedVertexId, 'currentPlayerId=', currentPlayerId, 'selectedOwner=', selectedVertex.stack[0]?.player, 'stackOwners=', selectedVertex.stack.map(s=>s.player));
         if (selectedVertex.stack[0]?.player === currentPlayerId) {
             // Attack targets
             if (isOccupied(selectedVertex)) {
-                updates.validAttackTargets = selectedVertex.adjacencies.filter(id => 
-                    vertices[id].stack.length > 0 && 
+                updates.validAttackTargets = selectedVertex.adjacencies.filter(id =>
+                    vertices[id].stack.length > 0 &&
                     vertices[id].stack[0].player !== currentPlayerId
                 );
             }
             // Move targets
             if (!turn.hasMoved && (updates.validMoveOrigins ?? []).includes(selectedVertexId)) {
-                if (DEBUG_MOVE) console.debug('[calculateValidActions] selectedVertex', selectedVertexId, 'stackLen=', selectedVertex.stack.length);
                 updates.validMoveTargets = selectedVertex.adjacencies.filter(id => {
                     const targetVertex = vertices[id];
                     // Allow moving onto friendly pieces (stacking)
@@ -223,22 +220,17 @@ export const calculateValidActions = (state: GameState): Partial<GameState> => {
                     if (targetVertex.stack.length > 0) {
                         const targetOwner = targetVertex.stack[0].player;
                         if (targetOwner !== currentPlayerId) {
-                            if (DEBUG_MOVE) console.debug('[calculateValidActions] target', id, 'blocked: enemy present');
                             return false; // Can't move onto enemy
                         }
                         // Allow stacking with friendly pieces
                     }
                     // If the moving stack contains multiple pieces, allow movement
                     // (stacks can collapse/move even if they don't meet 'occupied' thresholds).
-                    if (selectedVertex.stack.length > 1) {
-                        if (DEBUG_MOVE) console.debug('[calculateValidActions] target', id, 'allowed: multi-piece stack');
-                        return true;
-                    }
+
 
                     // Otherwise, require the source to meet occupation requirements
                     // for the destination layer.
                     const ok = isOccupied(selectedVertex, targetVertex.layer);
-                    if (DEBUG_MOVE) console.debug('[calculateValidActions] target', id, 'isOccupied?', ok);
                     return ok;
                 });
             }

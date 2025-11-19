@@ -7,6 +7,54 @@ def _get_board_layout() -> List[int]:
     return [3, 5, 7, 5, 3]
 
 
+# Occupancy requirement constants (mirror TypeScript constants.ts)
+OCCUPATION_REQUIREMENTS = [
+    {'minPieces': 1, 'minEnergy': 1, 'minForce': 1},  # 3x3 layers (0, 4)
+    {'minPieces': 1, 'minEnergy': 1, 'minForce': 4},  # 5x5 layers (1, 3)
+    {'minPieces': 1, 'minEnergy': 1, 'minForce': 9},  # 7x7 layer (2)
+]
+
+LAYER_GRAVITY = [1.0, 2.0, 3.0, 2.0, 1.0]
+FORCE_CAP_MAX = 10
+
+
+def get_occupation_requirement(layer: int) -> Dict[str, int]:
+    """Get occupation requirements for a given layer."""
+    if layer == 0 or layer == 4:
+        return OCCUPATION_REQUIREMENTS[0]
+    if layer == 1 or layer == 3:
+        return OCCUPATION_REQUIREMENTS[1]
+    return OCCUPATION_REQUIREMENTS[2]
+
+
+def get_force(vertex: Dict[str, Any]) -> float:
+    """Calculate force for a vertex (mirrors TypeScript getForce)."""
+    if not vertex or not vertex.get('stack'):
+        return 0.0
+    
+    layer = vertex.get('layer', 0)
+    gravity_divider = LAYER_GRAVITY[layer]
+    pieces = len(vertex['stack'])
+    energy = vertex.get('energy', 0)
+    
+    force = (pieces * energy) / gravity_divider
+    return min(force, FORCE_CAP_MAX)
+
+
+def is_occupied(vertex: Dict[str, Any], requirement_layer: Optional[int] = None) -> bool:
+    """Check if a vertex meets occupation requirements for a given layer."""
+    layer_to_check = requirement_layer if requirement_layer is not None else vertex.get('layer', 0)
+    req = get_occupation_requirement(layer_to_check)
+    force = get_force(vertex)
+    
+    pieces = len(vertex.get('stack', []))
+    energy = vertex.get('energy', 0)
+    
+    return (pieces >= req['minPieces'] and 
+            energy >= req['minEnergy'] and 
+            force >= req['minForce'])
+
+
 def initialize_game() -> Dict[str, Any]:
     board_layout = _get_board_layout()
     vertices = {}
@@ -84,7 +132,17 @@ def get_legal_moves(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not turn['hasInfused']:
         for vid, vertex in vertices.items():
             if vertex['stack'] and vertex['stack'][0]['player'] == current_player:
-                if vertex.get('energy', 0) < 10:
+                # Check if infusion would exceed force cap
+                layer = vertex.get('layer', 0)
+                gravity_divider = LAYER_GRAVITY[layer]
+                pieces = len(vertex['stack'])
+                current_energy = vertex.get('energy', 0)
+                
+                # Calculate potential force after infusion
+                potential_force = (pieces * (current_energy + 1)) / gravity_divider
+                
+                # Only allow infusion if it won't exceed force cap
+                if potential_force <= FORCE_CAP_MAX:
                     moves.append({'type': 'infuse', 'vertexId': vid})
 
     # Movement
@@ -93,7 +151,12 @@ def get_legal_moves(state: Dict[str, Any]) -> List[Dict[str, Any]]:
             if vertex['stack'] and vertex['stack'][0]['player'] == current_player:
                 for target_id in vertex['adjacencies']:
                     target = vertices[target_id]
-                    if not target['stack']:
+                    # Can't move onto enemy pieces
+                    if target['stack'] and target['stack'][0]['player'] != current_player:
+                        continue
+                    
+                    # Check if source meets occupation requirements for target layer
+                    if is_occupied(vertex, target['layer']):
                         moves.append({'type': 'move', 'fromId': vid, 'toId': target_id})
 
     # Attack

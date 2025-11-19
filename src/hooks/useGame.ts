@@ -7,7 +7,8 @@ import {
     calculateValidActions,
     getForce,
     checkWinner,
-    resolveCombat
+    resolveCombat,
+    isOccupied
 } from '../game/gameLogic';
 import { gameLogger } from '../services/gameLogger';
 import { Capacitor } from '@capacitor/core';
@@ -82,6 +83,14 @@ export const useGame = () => {
         setMoveHistory(prev => {
             if (prev.length === 0) return prev;
             const previousState = prev[prev.length - 1];
+
+            // Only allow undo if the previous state was the same player
+            // (prevents undoing opponent's moves)
+            if (previousState.currentPlayerId !== gameState.currentPlayerId) {
+                console.log('Cannot undo opponent\'s move');
+                return prev;
+            }
+
             setGameState(previousState);
             return prev.slice(0, -1);
         });
@@ -140,129 +149,190 @@ export const useGame = () => {
                     break;
 
                 case 'place':
+                    // Validate place directly
                     if (!prev.turn.hasPlaced &&
-                        prev.validPlacementVertices.includes(action.vertexId) &&
-                        prev.players[prev.currentPlayerId].reinforcements > 0) {
+                        prev.players[prev.currentPlayerId].reinforcements > 0 &&
+                        action.vertexId) {
 
-                        const newPiece: Piece = {
-                            id: `p-${Date.now()}`,
-                            player: prev.currentPlayerId
-                        };
-                        nextState.vertices[action.vertexId].stack.push(newPiece);
-                        nextState.players[prev.currentPlayerId].reinforcements -= 1;
-                        nextState.turn.hasPlaced = true;
+                        // Check if vertex is a home corner for current player
+                        const isHomeCorner = prev.homeCorners[prev.currentPlayerId].includes(action.vertexId);
+
+                        if (isHomeCorner) {
+                            const newPiece: Piece = {
+                                id: `p-${Date.now()}`,
+                                player: prev.currentPlayerId
+                            };
+                            nextState.vertices[action.vertexId].stack.push(newPiece);
+                            nextState.players[prev.currentPlayerId].reinforcements -= 1;
+                            nextState.turn.hasPlaced = true;
+                        } else {
+                            console.log('Place validation failed: not a home corner');
+                        }
                     }
                     break;
 
                 case 'infuse':
-                    if (!prev.turn.hasInfused &&
-                        prev.validInfusionVertices.includes(action.vertexId)) {
+                    // Validate infuse directly
+                    if (!prev.turn.hasInfused && action.vertexId) {
+                        const vertex = nextState.vertices[action.vertexId];
 
-                        nextState.vertices[action.vertexId].energy += 1;
-                        nextState.turn.hasInfused = true;
+                        // Check if vertex has friendly pieces
+                        const hasFriendlyPieces = vertex && vertex.stack.length > 0 &&
+                            vertex.stack[0].player === prev.currentPlayerId;
+
+                        // Check if energy won't exceed force cap after infusion
+                        const currentForce = getForce(vertex);
+                        const potentialForce = (vertex.stack.length * (vertex.energy + 1)) /
+                            (vertex.layer !== undefined ? [1.0, 2.0, 3.0, 2.0, 1.0][vertex.layer] : 1.0);
+                        const withinForceCap = potentialForce <= GAME_RULES.forceCapMax;
+
+                        if (hasFriendlyPieces && withinForceCap) {
+                            nextState.vertices[action.vertexId].energy += 1;
+                            nextState.turn.hasInfused = true;
+                        } else {
+                            console.log('Infuse validation failed:', { hasFriendlyPieces, withinForceCap });
+                        }
                     }
                     break;
 
                 case 'move':
-                    if (!prev.turn.hasMoved &&
-                        prev.validMoveOrigins.includes(action.fromId) &&
-                        prev.validMoveTargets.includes(action.toId)) {
+                    // Validate move directly instead of relying on validMoveTargets
+                    // (which requires a selected vertex that AI doesn't set)
+                    if (!prev.turn.hasMoved && action.fromId && action.toId) {
                         const source = nextState.vertices[action.fromId];
                         const target = nextState.vertices[action.toId];
-                        if (target.stack.length > 0 && target.stack[0].player === nextState.currentPlayerId) {
-                            // Stacking: combine stacks and sum energy
-                            target.stack = [...target.stack, ...source.stack];
-                            target.energy += source.energy;
+
+                        // Check if source has pieces and belongs to current player
+                        const sourceValid = source && source.stack.length > 0 &&
+                            source.stack[0].player === prev.currentPlayerId;
+
+                        // Check if target is adjacent to source
+                        const isAdjacent = source && source.adjacencies.includes(action.toId);
+
+                        // Check if target is not enemy-occupied
+                        const targetNotEnemy = !target.stack.length ||
+                            target.stack[0].player === prev.currentPlayerId;
+
+                        // Check if source meets occupancy requirements for target layer
+                        const meetsOccupancy = isOccupied(source, target.layer);
+
+                        if (sourceValid && isAdjacent && targetNotEnemy && meetsOccupancy) {
+                            if (target.stack.length > 0 && target.stack[0].player === nextState.currentPlayerId) {
+                                // Stacking: combine stacks and sum energy
+                                target.stack = [...target.stack, ...source.stack];
+                                target.energy += source.energy;
+                            } else {
+                                // Move to empty vertex
+                                target.stack = source.stack;
+                                target.energy = source.energy;
+                            }
+                            source.stack = [];
+                            source.energy = 0;
+                            nextState.turn.hasMoved = true;
+                            nextState.selectedVertexId = null;
                         } else {
-                            // Move to empty or enemy vertex (shouldn't happen for enemy due to validation)
-                            target.stack = source.stack;
-                            target.energy = source.energy;
+                            console.log('Move validation failed:', {
+                                sourceValid, isAdjacent, targetNotEnemy, meetsOccupancy,
+                                fromId: action.fromId, toId: action.toId
+                            });
                         }
-                        source.stack = [];
-                        source.energy = 0;
-                        nextState.turn.hasMoved = true;
-                        nextState.selectedVertexId = null;
                     }
                     break;
 
                 case 'attack':
-                    if (action.vertexId &&
-                        action.targetId &&
-                        prev.validAttackTargets.includes(action.targetId)) {
-
+                    // Validate attack directly
+                    if (action.vertexId && action.targetId) {
                         const attackerV = nextState.vertices[action.vertexId];
                         const defenderV = nextState.vertices[action.targetId];
-                        // Capture owner before clearing stack
-                        const defenderOwner = defenderV.stack[0]?.player;
 
-                        const result = resolveCombat(attackerV, defenderV);
+                        // Check if attacker has friendly pieces and is occupied
+                        const attackerValid = attackerV && attackerV.stack.length > 0 &&
+                            attackerV.stack[0].player === prev.currentPlayerId &&
+                            isOccupied(attackerV);
 
-                        if (result.outcome === 'attacker_win') {
-                            // Attacker moves to defender vertex
-                            defenderV.stack = [];
-                            for (let i = 0; i < result.attacker.pieces; i++) {
-                                defenderV.stack.push({
-                                    id: `p-conquer-${i}-${Date.now()}`,
-                                    player: prev.currentPlayerId
-                                });
-                            }
-                            defenderV.energy = result.attacker.energy;
+                        // Check if target is adjacent
+                        const isAdjacent = attackerV && attackerV.adjacencies.includes(action.targetId);
 
-                            // Source becomes empty
-                            attackerV.stack = [];
-                            attackerV.energy = 0;
-                        } else if (result.outcome === 'defender_win') {
-                            // Defender stays, attacker destroyed
-                            defenderV.stack = [];
-                            for (let i = 0; i < result.defender.pieces; i++) {
-                                defenderV.stack.push({
-                                    id: `p-defend-${i}-${Date.now()}`,
-                                    player: defenderOwner
-                                });
-                            }
-                            defenderV.energy = result.defender.energy;
+                        // Check if defender has enemy pieces
+                        const defenderIsEnemy = defenderV && defenderV.stack.length > 0 &&
+                            defenderV.stack[0].player !== prev.currentPlayerId;
 
-                            // Attacker destroyed
-                            attackerV.stack = [];
-                            attackerV.energy = 0;
-                        } else {
-                            // Draw: Both stay at original positions with reduced stats
-                            // Update Attacker at Source
-                            if (result.attacker.pieces > 0) {
-                                attackerV.stack = [];
+                        if (attackerValid && isAdjacent && defenderIsEnemy) {
+                            // Capture owner before clearing stack
+                            const defenderOwner = defenderV.stack[0]?.player;
+
+                            const result = resolveCombat(attackerV, defenderV);
+
+                            if (result.outcome === 'attacker_win') {
+                                // Attacker moves to defender vertex
+                                defenderV.stack = [];
                                 for (let i = 0; i < result.attacker.pieces; i++) {
-                                    attackerV.stack.push({
-                                        id: `p-draw-att-${i}-${Date.now()}`,
+                                    defenderV.stack.push({
+                                        id: `p-conquer-${i}-${Date.now()}`,
                                         player: prev.currentPlayerId
                                     });
                                 }
-                                attackerV.energy = result.attacker.energy;
-                            } else {
+                                defenderV.energy = result.attacker.energy;
+
+                                // Source becomes empty
                                 attackerV.stack = [];
                                 attackerV.energy = 0;
-                            }
-
-                            // Update Defender at Target
-                            if (result.defender.pieces > 0) {
+                            } else if (result.outcome === 'defender_win') {
+                                // Defender stays, attacker destroyed
                                 defenderV.stack = [];
                                 for (let i = 0; i < result.defender.pieces; i++) {
                                     defenderV.stack.push({
-                                        id: `p-draw-def-${i}-${Date.now()}`,
+                                        id: `p-defend-${i}-${Date.now()}`,
                                         player: defenderOwner
                                     });
                                 }
                                 defenderV.energy = result.defender.energy;
-                            } else {
-                                defenderV.stack = [];
-                                defenderV.energy = 0;
-                            }
-                        }
 
-                        // End turn
-                        nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
-                        nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
-                        nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
-                        nextState.selectedVertexId = null;
+                                // Attacker destroyed
+                                attackerV.stack = [];
+                                attackerV.energy = 0;
+                            } else {
+                                // Draw: Both stay at original positions with reduced stats
+                                // Update Attacker at Source
+                                if (result.attacker.pieces > 0) {
+                                    attackerV.stack = [];
+                                    for (let i = 0; i < result.attacker.pieces; i++) {
+                                        attackerV.stack.push({
+                                            id: `p-draw-att-${i}-${Date.now()}`,
+                                            player: prev.currentPlayerId
+                                        });
+                                    }
+                                    attackerV.energy = result.attacker.energy;
+                                } else {
+                                    attackerV.stack = [];
+                                    attackerV.energy = 0;
+                                }
+
+                                // Update Defender at Target
+                                if (result.defender.pieces > 0) {
+                                    defenderV.stack = [];
+                                    for (let i = 0; i < result.defender.pieces; i++) {
+                                        defenderV.stack.push({
+                                            id: `p-draw-def-${i}-${Date.now()}`,
+                                            player: defenderOwner
+                                        });
+                                    }
+                                    defenderV.energy = result.defender.energy;
+                                } else {
+                                    defenderV.stack = [];
+                                    defenderV.energy = 0;
+                                }
+                            }
+
+                            // End turn
+                            nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
+                            nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
+                            nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
+                            nextState.selectedVertexId = null;
+                            setMoveHistory([]);
+                        } else {
+                            console.log('Attack validation failed:', { attackerValid, isAdjacent, defenderIsEnemy });
+                        }
                     }
                     break;
 
@@ -325,6 +395,7 @@ export const useGame = () => {
                             nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
                             nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
                             nextState.selectedVertexId = null;
+                            setMoveHistory([]);
                         }
                     }
                     break;
@@ -335,6 +406,7 @@ export const useGame = () => {
                         nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
                         nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
                         nextState.selectedVertexId = null;
+                        setMoveHistory([]);
                     }
                     break;
             }
@@ -348,6 +420,16 @@ export const useGame = () => {
             // End game if there's a winner
             if (nextState.winner) {
                 gameLogger.endGame(nextState.winner);
+            }
+
+            // Auto-end turn if all actions are complete
+            if (nextState.turn.hasPlaced && nextState.turn.hasInfused && nextState.turn.hasMoved && !nextState.winner) {
+                nextState.currentPlayerId = nextState.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
+                nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
+                nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (nextState.turn?.turnNumber || 0) + 1 };
+                nextState.selectedVertexId = null;
+                // Clear move history when turn ends
+                setMoveHistory([]);
             }
 
             // Calculate valid actions for next state
@@ -379,5 +461,42 @@ export const useGame = () => {
         }
     }, [gameState]);
 
-    return { gameState, handleAction, undo, moveHistory };
+    // Difficulty state
+    const [difficulty, setDifficulty] = useState<'very_easy' | 'easy' | 'medium' | 'hard' | 'very_hard'>('medium');
+    const [isAiThinking, setIsAiThinking] = useState(false);
+
+    // AI Turn Logic
+    useEffect(() => {
+        const performAiMove = async () => {
+            // AI is Player 2
+            if (gameState.currentPlayerId === 'Player2' && !gameState.winner && !isAiThinking) {
+                setIsAiThinking(true);
+                try {
+                    // Small delay for better UX
+                    await new Promise(resolve => setTimeout(resolve, 500));
+
+                    // Import apiClient dynamically to avoid circular dependencies if any
+                    const { apiClient } = await import('../services/apiClient');
+
+                    const action = await apiClient.getAIMove(gameState, difficulty as any);
+
+                    console.log('AI returned action:', action);
+                    if (action) {
+                        console.log('Executing AI action:', action.type, action);
+                        handleAction(action);
+                    }
+                } catch (error) {
+                    console.error("AI Move Error:", error);
+                    // Fallback to end turn if AI fails to prevent stuck game
+                    handleAction({ type: 'endTurn' });
+                } finally {
+                    setIsAiThinking(false);
+                }
+            }
+        };
+
+        performAiMove();
+    }, [gameState, difficulty, handleAction]); // Added gameState to deps to trigger on turn updates
+
+    return { gameState, handleAction, undo, moveHistory, setDifficulty, isAiThinking };
 };

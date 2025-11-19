@@ -12,12 +12,19 @@ import { VisualEffectsManager } from '../game/visualEffects';
 import { Vertex } from '../game/types';
 
 
-const UnitGame: React.FC = () => {
+interface UnitGameProps {
+  onGameStart?: () => boolean;
+  isPremium?: boolean;
+}
+
+const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false }) => {
   const scene = useScene();
   const vfxRef = useRef<VisualEffectsManager | null>(null);
   const [visualQuality, setVisualQuality] = useState<'low' | 'medium' | 'high'>(
     isMobile() ? 'medium' : 'high'
   );
+  const [gameStarted, setGameStarted] = useState(false);
+  const [difficulty, setDifficulty] = useState<'very_easy' | 'easy' | 'medium' | 'hard' | 'very_hard'>('medium');
 
   // Initialize visual effects when scene is ready
   useEffect(() => {
@@ -51,7 +58,7 @@ const UnitGame: React.FC = () => {
     }
   }, [scene, visualQuality]);
 
-  const { gameState, handleAction: baseHandleAction, undo, moveHistory } = useGame();
+  const { gameState, handleAction: baseHandleAction, undo, moveHistory, setDifficulty: setGameDifficulty } = useGame();
   const [activePhase, setActivePhase] = useState<ActionPhase | null>(null);
 
   // Enhanced handleAction with VFX
@@ -134,17 +141,17 @@ const UnitGame: React.FC = () => {
   }, [gameState.winner, gameState.vertices, vfx]);
   // Register piece meshes as shadow casters and ground as shadow receiver
   useEffect(() => {
-      if (!scene) return;
-      
-      // Create ground ONCE
-      const existingGround = scene.getMeshByName('ground');
-      if (!existingGround) {
-          const ground = MeshBuilder.CreateGround('ground', { width: 30, height: 30 }, scene);
-          ground.position.y = -10;
-          const groundMat = new StandardMaterial('groundMat', scene);
-          groundMat.diffuseColor = new Color3(0.15, 0.15, 0.2);
-          ground.material = groundMat;
-      }
+    if (!scene) return;
+
+    // Create ground ONCE
+    const existingGround = scene.getMeshByName('ground');
+    if (!existingGround) {
+      const ground = MeshBuilder.CreateGround('ground', { width: 30, height: 30 }, scene);
+      ground.position.y = -10;
+      const groundMat = new StandardMaterial('groundMat', scene);
+      groundMat.diffuseColor = new Color3(0.15, 0.15, 0.2);
+      ground.material = groundMat;
+    }
   }, [scene]);
 
   // Victory celebration effect
@@ -173,7 +180,7 @@ const UnitGame: React.FC = () => {
     if (phase === 'placement' && gameState.turn.hasPlaced) return;
     if (phase === 'infusion' && gameState.turn.hasInfused) return;
     if (phase === 'movement' && gameState.turn.hasMoved) return;
-    
+
     setActivePhase(activePhase === phase ? null : phase);
     handleAction({ type: 'select', vertexId: null });
   }, [activePhase, gameState.turn, handleAction]);
@@ -184,36 +191,42 @@ const UnitGame: React.FC = () => {
 
     // Combat actions (when a vertex is already selected)
     if (selectedVertexId) {
-        if (validAttackTargets.includes(vertexId)) {
-            handleAction({ type: 'attack', vertexId: selectedVertexId, targetId: vertexId });
-            setActivePhase(null);
-            return;
-        } else if (validMoveTargets.includes(vertexId)) {
-            handleAction({ type: 'move', fromId: selectedVertexId, toId: vertexId });
-            setActivePhase(null);
-            return;
-        } else if (validPincerTargets && validPincerTargets[vertexId] && validPincerTargets[vertexId].includes(selectedVertexId)) {
-            handleAction({ type: 'pincer', targetId: vertexId, originIds: validPincerTargets[vertexId] });
-            setActivePhase(null);
-            return;
-        }
+      if (validAttackTargets.includes(vertexId)) {
+        handleAction({ type: 'attack', vertexId: selectedVertexId, targetId: vertexId });
+        setActivePhase(null);
+        return;
+      } else if (validMoveTargets.includes(vertexId)) {
+        handleAction({ type: 'move', fromId: selectedVertexId, toId: vertexId });
+        setActivePhase(null);
+        return;
+      } else if (validPincerTargets && validPincerTargets[vertexId] && validPincerTargets[vertexId].includes(selectedVertexId)) {
+        handleAction({ type: 'pincer', targetId: vertexId, originIds: validPincerTargets[vertexId] });
+        setActivePhase(null);
+        return;
+      }
     }
 
     // Phase-based actions
     if (activePhase === 'placement' && !turn.hasPlaced && validPlacementVertices.includes(vertexId)) {
-        handleAction({ type: 'place', vertexId });
-        setActivePhase(null);
+      handleAction({ type: 'place', vertexId });
+      setActivePhase(null);
     } else if (activePhase === 'infusion' && !turn.hasInfused && validInfusionVertices.includes(vertexId)) {
-        handleAction({ type: 'infuse', vertexId });
-        setActivePhase(null);
-    } else if (activePhase === 'movement' && clickedVertex.stack.length > 0 && clickedVertex.stack[0].player === currentPlayerId) {
+      handleAction({ type: 'infuse', vertexId });
+      setActivePhase(null);
+    } else if (activePhase === 'movement') {
+      // During movement phase, only allow selecting friendly vertices as sources
+      if (clickedVertex.stack.length > 0 && clickedVertex.stack[0].player === currentPlayerId) {
         handleAction({ type: 'select', vertexId: selectedVertexId === vertexId ? null : vertexId });
-    } else if (clickedVertex.stack.length > 0 && clickedVertex.stack[0].player === currentPlayerId) {
-        // General selection for combat
-        handleAction({ type: 'select', vertexId: selectedVertexId === vertexId ? null : vertexId });
-    } else {
-        // Deselect
+      } else {
+        // Deselect if clicking on non-friendly vertex during movement phase
         handleAction({ type: 'select', vertexId: null });
+      }
+    } else if (clickedVertex.stack.length > 0 && clickedVertex.stack[0].player === currentPlayerId) {
+      // General selection for friendly vertices (for combat)
+      handleAction({ type: 'select', vertexId: selectedVertexId === vertexId ? null : vertexId });
+    } else {
+      // Allow viewing enemy/empty vertices (but not selecting them as action sources)
+      handleAction({ type: 'select', vertexId: selectedVertexId === vertexId ? null : vertexId });
     }
   }, [gameState, handleAction, activePhase]);
 
@@ -224,43 +237,115 @@ const UnitGame: React.FC = () => {
     }
   };
 
+  const startGame = () => {
+    if (onGameStart) {
+      const canStart = onGameStart();
+      if (canStart) {
+        setGameStarted(true);
+        if (setGameDifficulty) {
+          setGameDifficulty(difficulty);
+        }
+      }
+    } else {
+      setGameStarted(true);
+      if (setGameDifficulty) {
+        setGameDifficulty(difficulty);
+      }
+    }
+  };
+
+  if (!gameStarted) {
+    return (
+      <div className="start-screen">
+        <div className="start-content">
+          <h1>Unit</h1>
+          <p className="subtitle">Strategy Across Dimensions</p>
+
+          <div className="difficulty-selector">
+            <h3>Select Difficulty</h3>
+            <div className="difficulty-options">
+              <button
+                className={`diff-btn ${difficulty === 'very_easy' ? 'active' : ''}`}
+                onClick={() => setDifficulty('very_easy')}
+              >
+                Very Easy
+              </button>
+              <button
+                className={`diff-btn ${difficulty === 'easy' ? 'active' : ''}`}
+                onClick={() => setDifficulty('easy')}
+              >
+                Easy
+              </button>
+              <button
+                className={`diff-btn ${difficulty === 'medium' ? 'active' : ''}`}
+                onClick={() => setDifficulty('medium')}
+              >
+                Medium
+              </button>
+              <button
+                className={`diff-btn ${difficulty === 'hard' ? 'active' : ''}`}
+                onClick={() => setDifficulty('hard')}
+              >
+                Hard
+              </button>
+            </div>
+            <div className="difficulty-desc">
+              {difficulty === 'very_easy' && "Perfect for beginners. Opponent makes random moves."}
+              {difficulty === 'easy' && "A gentle challenge. Opponent focuses on spreading out."}
+              {difficulty === 'medium' && "Balanced gameplay. Opponent plays defensively."}
+              {difficulty === 'hard' && "A true test of skill. Opponent plays aggressively."}
+            </div>
+          </div>
+
+          <button className="start-button" onClick={startGame}>
+            ENTER THE ARENA
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ 
-        width: '100vw', 
-        height: '100vh', 
-        margin: 0, 
-        padding: 0, 
-        overflow: 'hidden',
-        background: 'linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%)',
-        position: 'relative',
-        fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    <div style={{
+      width: '100vw',
+      height: '100vh',
+      margin: 0,
+      padding: 0,
+      overflow: 'hidden',
+      background: 'linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%)',
+      position: 'relative',
+      fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     }}>
       {/* Settings menu for visual quality */}
-        {/* Settings are now accessible via the top-left menu -> Settings in MobileHUD */}
-      <MobileHUD 
-        gameState={gameState} 
+      {/* Settings are now accessible via the top-left menu -> Settings in MobileHUD */}
+      <MobileHUD
+        gameState={gameState}
         onEndTurn={() => {
-            handleAction({ type: 'endTurn' });
-            setActivePhase(null);
+          handleAction({ type: 'endTurn' });
+          setActivePhase(null);
         }}
         activePhase={activePhase}
         onPhaseSelect={handlePhaseSelect}
         onUndo={undo}
         undoCount={moveHistory.length}
-          visualQuality={visualQuality}
-          onQualityChange={handleQualityChange}
+        visualQuality={visualQuality}
+        onQualityChange={handleQualityChange}
+        onBack={() => {
+          handleAction({ type: 'select', vertexId: null });
+          setActivePhase(null);
+        }}
       />
       <Engine antialias adaptToDeviceRatio canvasId="babylonJS">
         <Scene>
-          <arcRotateCamera 
-            name="camera1" 
-            target={Vector3.Zero()} 
-            alpha={-Math.PI / 2.5} 
-            beta={Math.PI / 3} 
-            radius={40} 
-            minZ={0.001} 
-            wheelPrecision={50} 
-            lowerRadiusLimit={20} 
+          <arcRotateCamera
+            name="camera1"
+            target={Vector3.Zero()}
+            alpha={-Math.PI / 2.5}
+            beta={Math.PI / 3}
+            radius={40}
+            minZ={0.001}
+            wheelPrecision={50}
+            lowerRadiusLimit={20}
             upperRadiusLimit={80}
             panningSensibility={0}
             onCreated={camera => camera.attachControl(true)}

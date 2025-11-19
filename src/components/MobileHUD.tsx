@@ -34,9 +34,10 @@ interface MobileHUDProps {
   undoCount?: number;
   visualQuality: 'low' | 'medium' | 'high';
   onQualityChange: (quality: 'low' | 'medium' | 'high') => void;
+  onBack?: () => void;
 }
 
-const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase, onPhaseSelect, onUndo, undoCount, visualQuality, onQualityChange }) => {
+const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase, onPhaseSelect, onUndo, undoCount, visualQuality, onQualityChange, onBack }) => {
   const { turn, currentPlayerId, winner, players, selectedVertexId, validAttackTargets, validMoveTargets, vertices } = gameState;
   const [showMenu, setShowMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -78,8 +79,8 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
 
   // Position the Quick Help button adjacent to the DebugPanel by measuring it.
   useEffect(() => {
-  let observer: ResizeObserver | null = null;
-  const el = document.getElementById('debug-panel-inner');
+    let observer: ResizeObserver | null = null;
+    const el = document.getElementById('debug-panel-inner');
     const gap = 8; // px gap between quick-help and debug panel
     const baseRight = 12; // DebugPanel right offset
     const update = () => {
@@ -94,9 +95,9 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
 
     if (el && (window as any).ResizeObserver) {
       // ResizeObserver type from window may differ in this TS environment; use any to construct.
-  // @ts-ignore
-  observer = new (window as any).ResizeObserver(update);
-  observer!.observe(el as Element);
+      // @ts-ignore
+      observer = new (window as any).ResizeObserver(update);
+      observer!.observe(el as Element);
     }
     // initial update and on window resize
     update();
@@ -146,7 +147,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
         borderBottom: `4px solid ${playerColor}`,
         boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
       }}>
-        <button 
+        <button
           onClick={() => setShowMenu(!showMenu)}
           style={{
             width: '50px',
@@ -169,9 +170,9 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
         </button>
 
         {/* Turn Info */}
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
           gap: '15px',
           flex: 1,
           justifyContent: 'center',
@@ -189,16 +190,16 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
               boxShadow: `0 0 16px ${playerColor}`,
               animation: 'pulse 2s ease-in-out infinite',
             }} />
-            <span style={{ 
-              color: 'white', 
-              fontSize: '20px', 
+            <span style={{
+              color: 'white',
+              fontSize: '20px',
               fontWeight: 'bold',
               fontFamily: 'system-ui, -apple-system, sans-serif',
             }}>
               {currentPlayerId === 'Player1' ? 'Blue' : 'Red'} Player
             </span>
           </div>
-          
+
           {/* Turn Counter */}
           <div style={{
             background: 'rgba(255,255,255,0.1)',
@@ -206,9 +207,9 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
             borderRadius: '20px',
             border: '2px solid rgba(255,255,255,0.2)',
           }}>
-            <span style={{ 
-              color: 'white', 
-              fontSize: '16px', 
+            <span style={{
+              color: 'white',
+              fontSize: '16px',
               fontWeight: 'bold',
             }}>
               Turn {turn.turnNumber || 1}
@@ -324,11 +325,11 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
             cursor: 'pointer',
             transition: 'all 0.2s ease',
           }}
-          onClick={() => {
-            // Open tutorial modal
-            setShowMenu(false);
-            setShowTutorial(true);
-          }}
+            onClick={() => {
+              // Open tutorial modal
+              setShowMenu(false);
+              setShowTutorial(true);
+            }}
           >
             📖 Tutorial
           </button>
@@ -344,11 +345,11 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
             cursor: 'pointer',
             transition: 'all 0.2s ease',
           }}
-          onClick={() => {
-            // Open settings overlay
-            setShowSettings(true);
-            setShowMenu(false);
-          }}
+            onClick={() => {
+              // Open settings overlay
+              setShowSettings(true);
+              setShowMenu(false);
+            }}
           >
             ⚙️ Settings
           </button>
@@ -505,15 +506,15 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
           boxShadow: '0 0 60px rgba(255,215,0,0.7)',
           animation: 'victoryPop 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
         }}>
-          <h1 style={{ 
-            margin: '0 0 20px 0', 
+          <h1 style={{
+            margin: '0 0 20px 0',
             fontSize: '42px',
             color: '#000',
             textShadow: '3px 3px 6px rgba(255,255,255,0.5)',
           }}>
             🏆 Victory! 🏆
           </h1>
-          <p style={{ 
+          <p style={{
             margin: '0 0 30px 0',
             fontSize: '28px',
             color: '#000',
@@ -532,7 +533,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
             cursor: 'pointer',
             transition: 'all 0.2s ease',
           }}
-          onClick={() => window.location.reload()}>
+            onClick={() => window.location.reload()}>
             New Game
           </button>
         </div>
@@ -568,11 +569,11 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                   disabled={turn.hasPlaced || players[currentPlayerId].reinforcements === 0}
                   style={{
                     minHeight: '75px',
-                    background: turn.hasPlaced 
+                    background: turn.hasPlaced
                       ? 'linear-gradient(135deg, rgba(50,205,50,0.3) 0%, rgba(34,139,34,0.3) 100%)'
                       : players[currentPlayerId].reinforcements === 0
-                      ? 'linear-gradient(135deg, rgba(100,100,100,0.3) 0%, rgba(80,80,80,0.3) 100%)'
-                      : 'linear-gradient(135deg, rgba(50,205,50,0.9) 0%, rgba(34,139,34,0.9) 100%)',
+                        ? 'linear-gradient(135deg, rgba(100,100,100,0.3) 0%, rgba(80,80,80,0.3) 100%)'
+                        : 'linear-gradient(135deg, rgba(50,205,50,0.9) 0%, rgba(34,139,34,0.9) 100%)',
                     border: '2px solid rgba(255,255,255,0.3)',
                     borderRadius: '12px',
                     color: 'white',
@@ -601,7 +602,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                   disabled={turn.hasInfused}
                   style={{
                     minHeight: '75px',
-                    background: turn.hasInfused 
+                    background: turn.hasInfused
                       ? 'linear-gradient(135deg, rgba(50,205,50,0.3) 0%, rgba(34,139,34,0.3) 100%)'
                       : 'linear-gradient(135deg, rgba(255,191,0,0.9) 0%, rgba(255,140,0,0.9) 100%)',
                     border: '2px solid rgba(255,255,255,0.3)',
@@ -632,7 +633,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                   disabled={turn.hasMoved}
                   style={{
                     minHeight: '75px',
-                    background: turn.hasMoved 
+                    background: turn.hasMoved
                       ? 'linear-gradient(135deg, rgba(50,205,50,0.3) 0%, rgba(34,139,34,0.3) 100%)'
                       : 'linear-gradient(135deg, rgba(0,206,209,0.9) 0%, rgba(0,139,139,0.9) 100%)',
                     border: '2px solid rgba(255,255,255,0.3)',
@@ -665,7 +666,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                 style={{
                   width: '100%',
                   minHeight: '60px',
-                  background: allMandatoryDone 
+                  background: allMandatoryDone
                     ? 'linear-gradient(135deg, rgba(255,215,0,0.95) 0%, rgba(255,165,0,0.95) 100%)'
                     : 'linear-gradient(135deg, rgba(100,100,100,0.4) 0%, rgba(80,80,80,0.4) 100%)',
                   border: allMandatoryDone ? '3px solid gold' : '2px solid rgba(255,255,255,0.2)',
@@ -824,6 +825,26 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                   <span>INFUSE</span>
                 </button>
               </div>
+
+              {/* Back Button */}
+              <button
+                onClick={() => onBack && onBack()}
+                style={{
+                  width: '100%',
+                  minHeight: '50px',
+                  marginTop: '10px',
+                  background: 'linear-gradient(135deg, rgba(100,100,100,0.6) 0%, rgba(80,80,80,0.6) 100%)',
+                  border: '2px solid rgba(255,255,255,0.3)',
+                  borderRadius: '10px',
+                  color: 'white',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                ← Back to Actions
+              </button>
             </div>
           )}
 
@@ -849,14 +870,34 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                 <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '14px', marginBottom: '12px' }}>
                   Stack: {selectedVertex.stack.length} | Energy: ⚡{selectedVertex.energy} | Layer {selectedVertex.layer}
                 </div>
-                <div style={{ 
-                  color: 'rgba(255,255,255,0.5)', 
+                <div style={{
+                  color: 'rgba(255,255,255,0.5)',
                   fontSize: '13px',
                   fontStyle: 'italic',
                 }}>
                   Select your own unit to take actions
                 </div>
               </div>
+
+              {/* Back Button */}
+              <button
+                onClick={() => onBack && onBack()}
+                style={{
+                  width: '100%',
+                  minHeight: '50px',
+                  marginTop: '12px',
+                  background: 'linear-gradient(135deg, rgba(100,100,100,0.6) 0%, rgba(80,80,80,0.6) 100%)',
+                  border: '2px solid rgba(255,255,255,0.3)',
+                  borderRadius: '10px',
+                  color: 'white',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                ← Back to Actions
+              </button>
             </div>
           )}
 
@@ -864,15 +905,14 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
           {panelState === 'action-active' && activeAction && (
             <div style={{ animation: 'fadeIn 0.3s ease' }}>
               <div style={{
-                background: activeAction === 'move' 
+                background: activeAction === 'move'
                   ? 'linear-gradient(135deg, rgba(0,206,209,0.3) 0%, rgba(0,139,139,0.3) 100%)'
                   : activeAction === 'attack'
-                  ? 'linear-gradient(135deg, rgba(220,20,60,0.3) 0%, rgba(139,0,0,0.3) 100%)'
-                  : 'linear-gradient(135deg, rgba(255,191,0,0.3) 0%, rgba(255,140,0,0.3) 100%)',
-                border: `3px solid ${
-                  activeAction === 'move' ? '#00CED1' : 
+                    ? 'linear-gradient(135deg, rgba(220,20,60,0.3) 0%, rgba(139,0,0,0.3) 100%)'
+                    : 'linear-gradient(135deg, rgba(255,191,0,0.3) 0%, rgba(255,140,0,0.3) 100%)',
+                border: `3px solid ${activeAction === 'move' ? '#00CED1' :
                   activeAction === 'attack' ? '#DC143C' : '#FFD700'
-                }`,
+                  }`,
                 borderRadius: '12px',
                 padding: '20px',
                 textAlign: 'center',
@@ -881,12 +921,12 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                   {activeAction === 'move' ? '➡️' : activeAction === 'attack' ? '⚔️' : '⚡'}
                 </div>
                 <div style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
-                  {activeAction === 'move' ? 'Select Move Destination' : 
-                   activeAction === 'attack' ? 'Select Attack Target' : 
-                   'Select Unit to Infuse'}
+                  {activeAction === 'move' ? 'Select Move Destination' :
+                    activeAction === 'attack' ? 'Select Attack Target' :
+                      'Select Unit to Infuse'}
                 </div>
-                <div style={{ 
-                  color: 'rgba(255,255,255,0.8)', 
+                <div style={{
+                  color: 'rgba(255,255,255,0.8)',
                   fontSize: '14px',
                   marginBottom: '16px',
                 }}>

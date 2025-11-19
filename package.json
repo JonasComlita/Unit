@@ -16,13 +16,15 @@
     "react-babylonjs": "latest",
     "react-dom": "latest",
     "react-scripts": "^5.0.1",
-    "typescript": "latest"
+    "typescript": "latest",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/msgpack-lite": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@types/jest": "latest"
+    "@types/jest": "latest",
+    "@types/uuid": "^9.0.7"
   },
   "scripts": {
     "start": "react-scripts start",

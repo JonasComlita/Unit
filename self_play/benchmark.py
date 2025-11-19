@@ -80,19 +80,6 @@ if __name__ == '__main__':
     print("\nRandom vs Aggressor:")
     benchmark(random_select, aggressor_select, rounds=10)
     
-    print("\n--- Greedy Variants vs A* ---")
-    print("\nGreedy (basic) vs A*:")
-    benchmark(greedy_select, a_star_select, rounds=6)
-    
-    print("\nBanker vs A*:")
-    benchmark(banker_select, a_star_select, rounds=6)
-    
-    print("\nSpreader vs A*:")
-    benchmark(spreader_select, a_star_select, rounds=6)
-    
-    print("\nAggressor vs A*:")
-    benchmark(aggressor_select, a_star_select, rounds=6)
-    
     print("\n--- Greedy Variants vs Each Other ---")
     print("\nBanker vs Spreader:")
     benchmark(banker_select, spreader_select, rounds=8)
