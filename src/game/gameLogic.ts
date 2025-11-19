@@ -195,9 +195,30 @@ export const calculateValidActions = (state: GameState): Partial<GameState> => {
 
     // Movement
     if (!turn.hasMoved) {
-        updates.validMoveOrigins = Object.values(vertices)
-            .filter(v => v.stack.length > 0 && v.stack[0].player === currentPlayerId)
-            .map(v => v.id);
+        // Check if any home corners are at max force (forced move rule)
+        const playerHomeCorners = homeCorners[currentPlayerId];
+        const maxForceHomeCorners = playerHomeCorners.filter(cornerId => {
+            const corner = vertices[cornerId];
+            if (!corner || corner.stack.length === 0 || corner.stack[0].player !== currentPlayerId) {
+                return false;
+            }
+            const force = getForce(corner);
+            return force >= GAME_RULES.forceCapMax;
+        });
+
+        // If any home corner is at max force, player MUST move from it
+        if (maxForceHomeCorners.length > 0) {
+            updates.validMoveOrigins = maxForceHomeCorners;
+            if (DEBUG_MOVE) {
+                console.log('🚨 FORCED MOVE: Home corners at max force:', maxForceHomeCorners);
+            }
+        } else {
+            // Normal movement: any friendly vertex
+            updates.validMoveOrigins = Object.values(vertices)
+                .filter(v => v.stack.length > 0 && v.stack[0].player === currentPlayerId)
+                .map(v => v.id);
+        }
+
     }
 
     // Attack & Move Targets

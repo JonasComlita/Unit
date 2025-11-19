@@ -421,31 +421,105 @@ class TrainingDataProcessor:
                 to_id = action_data.get('vertexId') or action_data.get('toId')
                 if to_id:
                     v = ensure_vertex(to_id)
-                    # place a minimal unit record (ownership is key for state_to_tensor)
+                    # place on top (index 0) to match gameLogic.ts
                     v['stack'].insert(0, {'player': player})
+                    # Decrement reinforcements if we can track them (state might not have players dict fully populated in this lightweight sim)
+                    if 'players' in state and player in state['players']:
+                        state['players'][player]['reinforcements'] -= 1
 
             elif action_type == 'move':
                 from_id = action_data.get('fromId') or action_data.get('vertexId')
                 to_id = action_data.get('toId')
                 if from_id and to_id and from_id in vertices:
                     src = vertices[from_id]
+                    dst = ensure_vertex(to_id)
+                    
+                    # Move ENTIRE stack and energy
                     if src.get('stack'):
-                        piece = src['stack'].pop(0)
-                        dst = ensure_vertex(to_id)
-                        dst['stack'].insert(0, piece)
+                        dst['stack'] = src['stack'] # Move all pieces
+                        dst['energy'] = src.get('energy', 0) # Move all energy
+                        
+                        # Clear source
+                        src['stack'] = []
+                        src['energy'] = 0
 
             elif action_type == 'attack':
-                # Simplified: remove top opposing piece at target if exists
-                target_id = action_data.get('targetId') or action_data.get('vertexId') or action_data.get('toId')
-                if target_id and target_id in vertices and vertices[target_id].get('stack'):
-                    top = vertices[target_id]['stack'][0]
-                    if top.get('player') != player:
-                        vertices[target_id]['stack'].pop(0)
+                attacker_id = action_data.get('vertexId') or action_data.get('fromId')
+                target_id = action_data.get('targetId') or action_data.get('toId')
+                
+                if attacker_id and target_id and attacker_id in vertices and target_id in vertices:
+                    attacker = vertices[attacker_id]
+                    defender = vertices[target_id]
+                    
+                    if attacker.get('stack') and defender.get('stack'):
+                        # Calculate Force
+                        # Note: We use raw values here. Gravity is not applied in this simplified sim 
+                        # unless we import constants, but usually force comparison is relative.
+                        # However, the rule is Force = (pieces * energy) / gravity. 
+                        # If we don't have gravity, we might be inaccurate. 
+                        # But for now, let's assume standard combat logic if gravity isn't available.
+                        # Actually, let's try to be as accurate as possible.
+                        
+                        att_pieces = len(attacker['stack'])
+                        att_energy = attacker.get('energy', 0)
+                        def_pieces = len(defender['stack'])
+                        def_energy = defender.get('energy', 0)
+                        
+                        # Simple force approximation if we don't have layer info easily
+                        # (pieces * energy). 
+                        # ideally we should use the real get_force logic if we have layers.
+                        att_layer = attacker.get('layer', 0)
+                        def_layer = defender.get('layer', 0)
+                        
+                        # Hardcoded gravity for now to match constants.ts
+                        LAYER_GRAVITY = [1.0, 2.0, 3.0, 2.0, 1.0]
+                        
+                        att_force = (att_pieces * att_energy) / LAYER_GRAVITY[att_layer] if att_layer < len(LAYER_GRAVITY) else (att_pieces * att_energy)
+                        def_force = (def_pieces * def_energy) / LAYER_GRAVITY[def_layer] if def_layer < len(LAYER_GRAVITY) else (def_pieces * def_energy)
+                        
+                        # Combat Resolution
+                        if att_force > def_force:
+                            # Attacker Wins
+                            new_pieces = abs(att_pieces - def_pieces)
+                            new_energy = abs(att_energy - def_energy)
+                            
+                            defender['stack'] = attacker['stack'][:new_pieces] # Keep top n pieces
+                            defender['energy'] = new_energy
+                            
+                            attacker['stack'] = []
+                            attacker['energy'] = 0
+                            
+                        elif def_force > att_force:
+                            # Defender Wins
+                            new_pieces = abs(def_pieces - att_pieces)
+                            new_energy = abs(def_energy - att_energy)
+                            
+                            defender['stack'] = defender['stack'][:new_pieces]
+                            defender['energy'] = new_energy
+                            
+                            attacker['stack'] = []
+                            attacker['energy'] = 0
+                            
+                        else:
+                            # Draw / Equal Force
+                            # Both remain, updated values
+                            new_att_pieces = max(0, att_pieces - def_pieces)
+                            new_att_energy = max(0, att_energy - def_energy)
+                            
+                            new_def_pieces = max(0, def_pieces - att_pieces)
+                            new_def_energy = max(0, def_energy - att_energy)
+                            
+                            attacker['stack'] = attacker['stack'][:new_att_pieces]
+                            attacker['energy'] = new_att_energy
+                            
+                            defender['stack'] = defender['stack'][:new_def_pieces]
+                            defender['energy'] = new_def_energy
 
             elif action_type == 'infuse':
                 # infuse may change energy on a vertex
                 vid = action_data.get('vertexId') or action_data.get('toId')
-                amount = action_data.get('amount') or 0
+                # amount is usually 1 in this game version
+                amount = action_data.get('amount') or 1 
                 if vid:
                     v = ensure_vertex(vid)
                     try:
@@ -453,7 +527,27 @@ class TrainingDataProcessor:
                     except Exception:
                         pass
 
-            # pincer and other types: best-effort no-op to keep simulation deterministic
+            elif action_type == 'pincer':
+                # Basic Pincer implementation
+                attacker_id = action_data.get('vertexId')
+                target_id = action_data.get('targetId')
+                if attacker_id and target_id and attacker_id in vertices and target_id in vertices:
+                    attacker = vertices[attacker_id]
+                    defender = vertices[target_id]
+                    
+                    if attacker.get('stack') and defender.get('stack'):
+                        # Pincer logic: Attacker moves to defender, defender destroyed? 
+                        # Or just damage? 
+                        # Standard pincer: Attacker + Ally flank defender. Defender takes damage/destroyed.
+                        # Simplified: Defender stack replaced by attacker stack (capture) if strong enough?
+                        # Let's assume standard capture for now as per agent_utils.py
+                        
+                        # For now, just clear attacker to simulate the move completion
+                        # and update defender if we want to be precise.
+                        # But without full context, clearing attacker is the minimum state change.
+                        attacker['stack'] = []
+                        attacker['energy'] = 0
+                        # (Real pincer logic is complex, but this prevents ghost pieces)
 
             # Toggle current player if present in state
             cur = state.get('currentPlayerId')

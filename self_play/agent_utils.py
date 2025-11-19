@@ -147,7 +147,21 @@ def get_legal_moves(state: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     # Movement
     if not turn['hasMoved']:
-        for vid, vertex in vertices.items():
+        # Check if any home corners are at max force (forced move rule)
+        forced_move_origins = []
+        for corner_id in state['homeCorners'][current_player]:
+            corner = vertices[corner_id]
+            if corner['stack'] and corner['stack'][0]['player'] == current_player:
+                force = get_force(corner)
+                if force >= FORCE_CAP_MAX:
+                    forced_move_origins.append(corner_id)
+        
+        # If forced moves exist, only generate moves from those origins
+        valid_origins = forced_move_origins if forced_move_origins else vertices.keys()
+
+        for vid in valid_origins:
+            vertex = vertices[vid]
+            # Standard check: must be owned by current player (redundant for forced moves but safe)
             if vertex['stack'] and vertex['stack'][0]['player'] == current_player:
                 for target_id in vertex['adjacencies']:
                     target = vertices[target_id]
@@ -198,7 +212,8 @@ def apply_move(state: Dict[str, Any], move: Dict[str, Any]) -> Dict[str, Any]:
         vertex_id = move['vertexId']
         vertex = new_state['vertices'][vertex_id]
         # create a simple piece id based on stack length
-        vertex['stack'].append({'player': current_player, 'id': f"p{len(vertex['stack'])}"})
+        # Insert at 0 (top) to match gameLogic.ts
+        vertex['stack'].insert(0, {'player': current_player, 'id': f"p{len(vertex['stack'])}"})
         new_state['players'][current_player]['reinforcements'] -= 1
         new_state['turn']['hasPlaced'] = True
 
@@ -223,48 +238,55 @@ def apply_move(state: Dict[str, Any], move: Dict[str, Any]) -> Dict[str, Any]:
         defender_id = move['targetId']
         attacker = new_state['vertices'][attacker_id]
         defender = new_state['vertices'][defender_id]
-        attacker_strength = len(attacker['stack']) * 10 + attacker.get('energy', 0) * 15
-        defender_strength = len(defender['stack']) * 10 + defender.get('energy', 0) * 15
         
+        # Use get_force for strength comparison
+        attacker_strength = get_force(attacker)
+        defender_strength = get_force(defender)
+        
+        att_pieces = len(attacker['stack'])
+        att_energy = attacker.get('energy', 0)
+        def_pieces = len(defender['stack'])
+        def_energy = defender.get('energy', 0)
+
         if attacker_strength > defender_strength:
             # Attacker wins
-            defender['stack'] = attacker['stack']
-            defender['energy'] = max(0, attacker.get('energy', 0) - defender.get('energy', 0))
+            new_pieces = abs(att_pieces - def_pieces)
+            new_energy = abs(att_energy - def_energy)
+            
+            # Move attacker to defender vertex (trimmed)
+            defender['stack'] = attacker['stack'][:new_pieces]
+            defender['energy'] = new_energy
+            
+            attacker['stack'] = []
+            attacker['energy'] = 0
+            
         elif defender_strength > attacker_strength:
             # Defender wins
-            defender['energy'] = max(0, defender.get('energy', 0) - attacker.get('energy', 0))
+            new_pieces = abs(def_pieces - att_pieces)
+            new_energy = abs(def_energy - att_energy)
+            
+            # Defender remains (trimmed)
+            defender['stack'] = defender['stack'][:new_pieces]
+            defender['energy'] = new_energy
+            
+            attacker['stack'] = []
+            attacker['energy'] = 0
+            
         else:
             # Draw / Equal Force
-            att_pieces = len(attacker['stack'])
-            def_pieces = len(defender['stack'])
-            att_energy = attacker.get('energy', 0)
-            def_energy = defender.get('energy', 0)
-
-            # Update Attacker
             new_att_pieces = max(0, att_pieces - def_pieces)
             new_att_energy = max(0, att_energy - def_energy)
             
-            if new_att_pieces > 0:
-                attacker['stack'] = [{'player': current_player, 'id': f'p_draw_att_{i}'} for i in range(new_att_pieces)]
-                attacker['energy'] = new_att_energy
-            else:
-                attacker['stack'] = []
-                attacker['energy'] = 0
-
-            # Update Defender
             new_def_pieces = max(0, def_pieces - att_pieces)
             new_def_energy = max(0, def_energy - att_energy)
             
-            defender_owner = defender['stack'][0]['player'] if defender['stack'] else 'Player2'
+            attacker['stack'] = attacker['stack'][:new_att_pieces]
+            attacker['energy'] = new_att_energy
             
-            if new_def_pieces > 0:
-                defender['stack'] = [{'player': defender_owner, 'id': f'p_draw_def_{i}'} for i in range(new_def_pieces)]
-                defender['energy'] = new_def_energy
-            else:
-                defender['stack'] = []
-                defender['energy'] = 0
+            defender['stack'] = defender['stack'][:new_def_pieces]
+            defender['energy'] = new_def_energy
             
-            # Return early to avoid common cleanup
+            # Return early to avoid common cleanup (which clears attacker)
             new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
             new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
             new_state['turn'] = {
@@ -275,10 +297,7 @@ def apply_move(state: Dict[str, Any], move: Dict[str, Any]) -> Dict[str, Any]:
             }
             return new_state
 
-        # Common cleanup for Win/Loss cases
-        attacker['stack'] = []
-        attacker['energy'] = 0
-        
+        # Common cleanup for Win/Loss cases (turn end)
         new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
         new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
         new_state['turn'] = {
@@ -287,6 +306,7 @@ def apply_move(state: Dict[str, Any], move: Dict[str, Any]) -> Dict[str, Any]:
             'hasMoved': False,
             'turnNumber': new_state['turn']['turnNumber'] + 1
         }
+        return new_state
 
     elif move_type == 'pincer':
         attacker_id = move.get('vertexId')

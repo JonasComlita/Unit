@@ -91,6 +91,35 @@ if __name__ == '__main__':
     benchmark(spreader_select, aggressor_select, rounds=8)
     
     print("\n" + "=" * 60)
+    print("MCTS Benchmarks")
+    print("=" * 60)
+    
+    from .mcts import MCTSAgent
+    
+    # Initialize MCTS agents
+    # Using fewer simulations for benchmark speed, but enough to be useful
+    mcts_d3 = MCTSAgent(simulations=20, rollout_depth=3)
+    mcts_d6 = MCTSAgent(simulations=20, rollout_depth=6)
+    
+    print("\nMCTS (d=3) vs Random:")
+    benchmark(mcts_d3.select_move, random_select, rounds=2)
+    
+    print("\nMCTS (d=6) vs Random:")
+    benchmark(mcts_d6.select_move, random_select, rounds=2)
+    
+    print("\nMCTS (d=3) vs Greedy (Basic):")
+    benchmark(mcts_d3.select_move, greedy_select, rounds=2)
+    
+    print("\nMCTS (d=6) vs Greedy (Basic):")
+    benchmark(mcts_d6.select_move, greedy_select, rounds=2)
+    
+    print("\nMCTS (d=3) vs Aggressor:")
+    benchmark(mcts_d3.select_move, aggressor_select, rounds=2)
+    
+    print("\nMCTS (d=6) vs Aggressor:")
+    benchmark(mcts_d6.select_move, aggressor_select, rounds=2)
+
+    print("\n" + "=" * 60)
     print("Benchmark complete!")
     print("=" * 60)
 
