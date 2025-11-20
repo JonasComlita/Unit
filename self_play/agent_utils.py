@@ -184,11 +184,25 @@ def get_legal_moves(state: Dict[str, Any]) -> List[Dict[str, Any]]:
                             moves.append({'type': 'attack', 'vertexId': vid, 'targetId': target_id})
 
         # Pincer
+        # Find all enemy vertices that have >= 2 friendly neighbors
         for vid, vertex in vertices.items():
-            if vertex['stack'] and vertex['stack'][0]['player'] == current_player and vertex.get('energy', 0) >= 2:
-                adjacent_enemies = [t for t in vertex['adjacencies'] if vertices[t]['stack'] and vertices[t]['stack'][0]['player'] != current_player]
-                for target_id in adjacent_enemies:
-                    moves.append({'type': 'pincer', 'vertexId': vid, 'targetId': target_id})
+            # Check if vertex is enemy-occupied
+            if vertex['stack'] and vertex['stack'][0]['player'] != current_player:
+                # Find friendly neighbors
+                friendly_neighbors = []
+                for adj_id in vertex['adjacencies']:
+                    neighbor = vertices[adj_id]
+                    if neighbor['stack'] and neighbor['stack'][0]['player'] == current_player:
+                        friendly_neighbors.append(adj_id)
+                
+                # If >= 2 friendly neighbors, it's a valid pincer target
+                if len(friendly_neighbors) >= 2:
+                    # We pass the targetId and the list of originIds
+                    moves.append({
+                        'type': 'pincer', 
+                        'targetId': vid, 
+                        'originIds': friendly_neighbors
+                    })
 
     if turn['hasPlaced'] and turn['hasInfused'] and turn['hasMoved']:
         moves.append({'type': 'endTurn'})
@@ -309,24 +323,58 @@ def apply_move(state: Dict[str, Any], move: Dict[str, Any]) -> Dict[str, Any]:
         return new_state
 
     elif move_type == 'pincer':
-        attacker_id = move.get('vertexId')
-        defender_id = move.get('targetId')
-        attacker = new_state['vertices'].get(attacker_id)
-        defender = new_state['vertices'].get(defender_id)
-        if not attacker or not defender:
+        target_id = move.get('targetId')
+        origin_ids = move.get('originIds', [])
+        
+        defender = new_state['vertices'].get(target_id)
+        origin_verts = [new_state['vertices'][oid] for oid in origin_ids if oid in new_state['vertices']]
+        
+        if not defender or not origin_verts:
             return new_state
-        if not attacker.get('stack') or attacker.get('energy', 0) < 2:
-            return new_state
-        attacker_strength = len(attacker['stack']) * 10 + attacker.get('energy', 0) * 15
-        defender_strength = len(defender['stack']) * 10 + defender.get('energy', 0) * 15
-        attacker_strength += 10
-        if attacker_strength > defender_strength:
-            defender['stack'] = attacker['stack']
-            defender['energy'] = max(0, attacker.get('energy', 0) - defender.get('energy', 0) - 1)
+
+        # Calculate combined attacker stats
+        attacker_force = 1.0
+        for v in origin_verts:
+            attacker_force *= get_force(v)
+        attacker_force = min(attacker_force, FORCE_CAP_MAX)
+        
+        defender_force = get_force(defender)
+        
+        attacker_pieces = sum(len(v['stack']) for v in origin_verts)
+        attacker_energy = sum(v.get('energy', 0) for v in origin_verts)
+        
+        defender_pieces = len(defender['stack'])
+        defender_energy = defender.get('energy', 0)
+        
+        new_pieces = abs(attacker_pieces - defender_pieces)
+        new_energy = abs(attacker_energy - defender_energy)
+        
+        if attacker_force > defender_force:
+            # Attacker wins
+            defender['stack'] = []
+            for i in range(new_pieces):
+                defender['stack'].append({
+                    'id': f"p-conquer-{i}",
+                    'player': current_player
+                })
+            defender['energy'] = new_energy
         else:
-            defender['energy'] = max(0, defender.get('energy', 0) - attacker.get('energy', 0))
-        attacker['stack'] = []
-        attacker['energy'] = 0
+            # Defender wins/holds
+            defender_owner = defender['stack'][0]['player'] if defender['stack'] else current_player
+            defender['stack'] = []
+            for i in range(new_pieces):
+                defender['stack'].append({
+                    'id': f"p-defend-{i}",
+                    'player': defender_owner
+                })
+            defender['energy'] = new_energy
+            
+        # Clear all origin vertices
+        for v in origin_verts:
+            v['stack'] = []
+            v['energy'] = 0
+
+        # End turn
         new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
         new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
         new_state['turn'] = {
