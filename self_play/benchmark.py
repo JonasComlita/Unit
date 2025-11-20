@@ -11,7 +11,8 @@ from typing import Callable
 from .agent_utils import initialize_game, apply_move, get_legal_moves
 from .random_algorithm import select_move as random_select
 from .greedy_algorithm import select_move as greedy_select
-from .a_star_algorithm import select_move as a_star_select
+from .greedy_algorithm import select_move as greedy_select
+# from .a_star_algorithm import select_move as a_star_select
 from .greedy_banker import select_move as banker_select
 from .greedy_spreader import select_move as spreader_select
 from .greedy_aggressor import select_move as aggressor_select

@@ -1,0 +1,184 @@
+/* src/components/MultiplayerLobby.css */
+
+.multiplayer-lobby {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.lobby-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 20px;
+    padding: 40px;
+    min-width: 400px;
+    max-width: 500px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    color: white;
+}
+
+.lobby-card h2 {
+    margin-top: 0;
+    font-size: 32px;
+    margin-bottom: 20px;
+}
+
+.lobby-card p {
+    font-size: 16px;
+    margin-bottom: 30px;
+    opacity: 0.9;
+}
+
+.find-match-btn,
+.back-btn,
+.cancel-btn {
+    padding: 15px 40px;
+    font-size: 18px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    margin: 5px;
+    transition: all 0.3s ease;
+    font-weight: bold;
+}
+
+.find-match-btn {
+    background: #48bb78;
+    color: white;
+}
+
+.find-match-btn:hover {
+    background: #38a169;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(72, 187, 120, 0.4);
+}
+
+.back-btn {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+}
+
+.back-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.cancel-btn {
+    background: #f56565;
+    color: white;
+}
+
+.cancel-btn:hover {
+    background: #e53e3e;
+}
+
+/* Searching State */
+.searching-state {
+    padding: 20px 0;
+}
+
+.spinner {
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    width: 60px;
+    height: 60px;
+    margin: 0 auto 20px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Match Found State */
+.match-found-state {
+    padding: 20px 0;
+}
+
+.success-icon {
+    width: 80px;
+    height: 80px;
+    background: #48bb78;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    margin: 0 auto 20px;
+    animation: scaleIn 0.5s ease;
+}
+
+@keyframes scaleIn {
+    from {
+        transform: scale(0);
+    }
+
+    to {
+        transform: scale(1);
+    }
+}
+
+.match-found-state h3 {
+    font-size: 28px;
+    margin: 10px 0;
+}
+
+.match-found-state strong {
+    color: #ffd700;
+}
+
+.starting-text {
+    font-style: italic;
+    opacity: 0.8;
+    animation: pulse 1.5s ease infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 0.6;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+/* Error Message */
+.error-message {
+    background: rgba(245, 101, 101, 0.9);
+    padding: 15px;
+    border-radius: 10px;
+    margin-top: 20px;
+    font-weight: bold;
+}
+
+/* Mobile Responsive */
+@media (max-width: 600px) {
+    .lobby-card {
+        min-width: 90%;
+        padding: 30px 20px;
+    }
+
+    .lobby-card h2 {
+        font-size: 24px;
+    }
+
+    .find-match-btn,
+    .back-btn,
+    .cancel-btn {
+        display: block;
+        width: 100%;
+        margin: 10px 0;
+    }
+}

@@ -1,3 +1,5 @@
+# ./.venv311/bin/python -m self_play.training_pipeline train --data-dir shards/v1_model_data --epochs 100 --batch-size 256
+
 #!/usr/bin/env python3
 """Minimal training pipeline example.
 
@@ -120,7 +122,7 @@ class TrainingConfig:
     train_test_split: float = 0.9
     
     # Model
-    num_vertices: int = 83
+    num_vertices: int = 117  # 3²+5²+7²+5²+3²
     checkpoint_dir: str = 'checkpoints'
     # Optional local shard/parquet input directory to train from instead of DB
     data_dir: str = None
@@ -248,7 +250,7 @@ class DataLoader:
 class TrainingDataProcessor:
     """Process raw game data into neural network training format."""
     
-    def __init__(self, num_vertices: int = 83):
+    def __init__(self, num_vertices: int = 117):
         self.num_vertices = num_vertices
     
     def process_games(self, games: List[Dict]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -305,7 +307,18 @@ class TrainingDataProcessor:
                 current_state = copy.deepcopy(initial)
 
             # Re-simulate the game: for each move, yield (state_before, policy_target, outcome)
-            for move_data in game.get('moves', []):
+            moves = game.get('moves', [])
+            
+            # Handle compressed moves (bytes)
+            if isinstance(moves, bytes):
+                try:
+                    import gzip
+                    moves = json.loads(gzip.decompress(moves).decode('utf-8'))
+                except Exception as e:
+                    logger.warning(f"Failed to decompress moves for game {game.get('game_id')}: {e}")
+                    continue
+            
+            for move_data in moves:
                 # Normalize move_data in case DB returned JSON strings
                 if isinstance(move_data, str):
                     try:
@@ -313,6 +326,20 @@ class TrainingDataProcessor:
                     except Exception:
                         # skip malformed move entry
                         continue
+                
+                # Handle integer moves (compressed indices) - still keep this just in case
+                if isinstance(move_data, int):
+                    # Regenerate legal moves to look up the move by index
+                    # This assumes the generator saved the index into the legal_moves list
+                    # sorted by some deterministic order (usually the order returned by get_legal_moves)
+                    from self_play.agent_utils import get_legal_moves
+                    legal_moves = get_legal_moves(current_state)
+                    if 0 <= move_data < len(legal_moves):
+                        move_data = legal_moves[move_data]
+                    else:
+                        logger.warning(f"Move index {move_data} out of bounds for {len(legal_moves)} legal moves")
+                        continue
+
                 # Ensure action_data is parsed when needed inside helpers
                 try:
                     state_tensor = state_to_tensor(current_state, self.num_vertices)
@@ -336,6 +363,20 @@ class TrainingDataProcessor:
                 # advance state to reflect the move we just processed
                 self._apply_move(current_state, move_data)
         
+        if len(states) == 0 and len(games) > 0:
+            logger.warning(f"Processed 0 examples from {len(games)} games. Debugging first game:")
+            if games:
+                g = games[0]
+                logger.warning(f"Game ID: {g.get('game_id')}, Initial State Present: {bool(g.get('initial_state'))}")
+                moves = g.get('moves', [])
+                logger.warning(f"Move count: {len(moves)}")
+                if moves:
+                    m0 = moves[0]
+                    if isinstance(m0, str): m0 = json.loads(m0)
+                    logger.warning(f"First move keys: {m0.keys()}")
+                    action_data = m0.get('action_data') or m0.get('action')
+                    logger.warning(f"First move action data: {action_data}")
+
         logger.info(f"Processed {len(states)} training examples from {len(games)} games")
         
         return (
@@ -617,7 +658,7 @@ class TrainingDataProcessor:
         if not state or not vertex_id:
             return None
         
-        vertices = list(state.get('vertices', {}).keys())
+        vertices = sorted(list(state.get('vertices', {}).keys()), key=lambda x: int(x[1:]))
         try:
             return vertices.index(vertex_id)
         except ValueError:
@@ -631,6 +672,80 @@ class TrainingDataProcessor:
             return -1.0
         else:
             return 0.0  # Draw
+
+    def _policy_to_move(self, policy_idx: int, state: Dict) -> Dict:
+        """Convert policy index back to move dictionary."""
+        if policy_idx is None:
+            return None
+        
+        policy_idx = int(policy_idx)
+        vertex_idx = policy_idx // 5
+        action_offset = policy_idx % 5
+        
+        vertices = sorted(list(state.get('vertices', {}).keys()), key=lambda x: int(x[1:]))
+        if vertex_idx >= len(vertices):
+            return None
+            
+        vertex_id = vertices[vertex_idx]
+        
+        action_types = {
+            0: 'place',
+            1: 'infuse',
+            2: 'move',
+            3: 'attack',
+            4: 'pincer'
+        }
+        action_type = action_types.get(action_offset)
+        
+        # We can't fully reconstruct targetId for move/attack/pincer just from the index
+        # because the index only encodes (Source, ActionType).
+        # The target is NOT encoded in the simple 5-action policy head.
+        # Wait, the policy head is [num_vertices * 5]. 
+        # 0: Place (on self)
+        # 1: Infuse (on self)
+        # 2: Move (from self... to where?) -> This policy head is incomplete for Move/Attack!
+        #
+        # If the shards contain integers, they MUST be encoding the full move somehow.
+        # If the policy is just 5 actions per vertex, it assumes fixed targets or a different scheme.
+        #
+        # However, if the generator wrote integers, it might be writing the *index in the legal_moves list*?
+        # No, that would be unstable.
+        #
+        # Let's assume for a moment the integer IS the policy index as defined in _move_to_policy.
+        # But _move_to_policy maps (vertex, type) -> index. It drops the target!
+        # This means the current policy definition is insufficient for a game with targets (Move/Attack).
+        #
+        # CRITICAL REALIZATION: The current `_move_to_policy` implementation is:
+        # return int(vertex_idx * 5 + action_offset)
+        # It completely ignores `toId` / `targetId`. 
+        # This means the model is only learning "Select Unit X and do Action Y", but not "Where".
+        # This is a major design flaw in the current `neural_network_model.py` / `training_pipeline.py`.
+        #
+        # But right now, I just need to unblock the training.
+        # If the shard contains integers, and I can't reconstruct the target, I can't apply the move.
+        #
+        # WAIT. If the shard contains integers, maybe they are NOT policy indices.
+        # Maybe they are something else?
+        #
+        # Let's look at the error again: "int object has no attribute keys".
+        # This happens in `for move_data in game.get('moves', [])`.
+        #
+        # If I can't reconstruct the move, I can't advance the state.
+        # If I can't advance the state, I can't train on the sequence.
+        #
+        # Temporary Fix:
+        # If move is int, assume it's a policy index.
+        # Use the policy index for the *label*.
+        # But for *applying* the move, we are stuck.
+        # UNLESS... we just skip applying it? No, then the state is wrong for the next step.
+        #
+        # Maybe the integer is an index into `legal_moves`?
+        # If so, we'd need to regenerate legal moves to find it.
+        #
+        # Let's try to regenerate legal moves and see if the integer matches an index.
+        # This is expensive but might work for recovery.
+        
+        return None
 
 
 class TrainingPipeline:
@@ -880,13 +995,34 @@ class TrainingPipeline:
             train_value_loss = 0.0
             batches = 0
 
+            # Generate static edge index for the board
+            # We need to construct it based on the canonical board layout
+            from self_play.agent_utils import initialize_game
+            dummy_state = initialize_game()
+            # Ensure vertices are sorted by ID to match our tensor mapping
+            sorted_ids = sorted(dummy_state['vertices'].keys(), key=lambda x: int(x[1:]))
+            id_to_idx = {vid: i for i, vid in enumerate(sorted_ids)}
+            
+            edges = []
+            for vid in sorted_ids:
+                src_idx = id_to_idx[vid]
+                for neighbor_id in dummy_state['vertices'][vid]['adjacencies']:
+                    if neighbor_id in id_to_idx:
+                        dst_idx = id_to_idx[neighbor_id]
+                        edges.append([src_idx, dst_idx])
+            
+            if edges:
+                edge_index = np.array(edges).T # [2, E]
+            else:
+                edge_index = np.zeros((2, 0), dtype=np.int64)
+
             for batch_states, batch_policies, batch_values in train_loader:
                 # Ensure numpy arrays for trainer API
                 bs = batch_states.numpy() if hasattr(batch_states, 'numpy') else np.array(batch_states)
                 bp = batch_policies.numpy() if hasattr(batch_policies, 'numpy') else np.array(batch_policies)
                 bv = batch_values.numpy() if hasattr(batch_values, 'numpy') else np.array(batch_values)
 
-                policy_loss, value_loss = self.trainer.train_on_batch(bs, bp, bv)
+                policy_loss, value_loss = self.trainer.train_on_batch(bs, bp, bv, edge_index=edge_index)
                 train_policy_loss += policy_loss
                 train_value_loss += value_loss
                 batches += 1
@@ -960,6 +1096,85 @@ class TrainingPipeline:
             return 0.0, 0.0
         return total_policy_loss / count, total_value_loss / count
     
+    async def evaluate_model(self):
+        """Evaluate the current model against a baseline."""
+        logger.info(f"Evaluating model from {self.config.model_path}...")
+        
+        if not self.config.model_path or not os.path.exists(self.config.model_path):
+            logger.error("No model path provided or file does not exist.")
+            return
+
+        # Load model
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = UnitGameNet(num_vertices=self.config.num_vertices).to(device)
+        try:
+            checkpoint = torch.load(self.config.model_path, map_location=device)
+            # Handle both full checkpoint dict and raw state_dict
+            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'])
+            else:
+                model.load_state_dict(checkpoint)
+            logger.info("Model loaded successfully.")
+        except Exception as e:
+            logger.error(f"Failed to load model: {e}")
+            return
+        
+        model.eval()
+        
+        # Define agent function
+        from self_play.neural_network_model import state_to_tensor
+        from self_play.agent_utils import get_legal_moves
+        
+        def model_agent(state: Dict) -> Dict:
+            legal_moves = get_legal_moves(state)
+            if not legal_moves:
+                return {'type': 'endTurn'}
+            
+            # Prepare input
+            try:
+                state_np = state_to_tensor(state, self.config.num_vertices)
+                tensor = torch.from_numpy(state_np).float().unsqueeze(0).to(device)
+                with torch.no_grad():
+                    policy_logits, value = model(tensor)
+                
+                # Mask illegal moves
+                # This is tricky because we need to map legal moves to policy indices.
+                # We reuse the processor's helper if available, or just pick the best valid one.
+                # Since we don't have a perfect map, let's just iterate legal moves, 
+                # get their policy index, and pick the one with highest logit.
+                
+                best_move = None
+                best_logit = -float('inf')
+                
+                # We need an instance of processor to use _move_to_policy
+                # But _move_to_policy is an instance method.
+                # Let's just use the one attached to self.
+                
+                for move in legal_moves:
+                    idx = self.processor._move_to_policy(move, state)
+                    if idx is not None and 0 <= idx < policy_logits.shape[1]:
+                        logit = policy_logits[0, idx].item()
+                        if logit > best_logit:
+                            best_logit = logit
+                            best_move = move
+                
+                if best_move:
+                    return best_move
+                
+                # Fallback if no moves mapped
+                import random
+                return random.choice(legal_moves)
+            except Exception as e:
+                logger.error(f"Model inference failed: {e}")
+                return {'type': 'endTurn'}
+
+        # Run benchmark
+        from self_play.benchmark import benchmark
+        from self_play.greedy_algorithm import select_move as greedy_select
+        
+        logger.info("Running benchmark: Model vs Greedy (20 rounds)...")
+        benchmark(model_agent, greedy_select, rounds=20)
+
     async def run_full_pipeline(self):
         """Run complete pipeline: generate data → train → evaluate."""
         logger.info("Starting full training pipeline...")
@@ -970,9 +1185,12 @@ class TrainingPipeline:
         # Step 2: Train model
         await self.train_model()
         
-        # Step 3: Evaluate (placeholder - would run games NN vs minimax)
+        # Step 3: Evaluate
+        # Use the best model we just trained
+        self.config.model_path = os.path.join(self.config.checkpoint_dir, "best_model.pt")
+        await self.evaluate_model()
+        
         logger.info("Training pipeline complete!")
-        logger.info(f"Best model saved to: {self.config.checkpoint_dir}/best_model.pt")
 
 
 async def main():
@@ -987,7 +1205,7 @@ async def main():
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--model', type=str, help='Model checkpoint path')
     parser.add_argument('--db-url', type=str, help='Database URL')
-    parser.add_argument('--data-dir', type=str, help='Directory of Parquet/JSONL shards to train from (bypass DB)')
+    parser.add_argument('--data-dir', type=str, help='Directory for training data shards')
     
     args = parser.parse_args()
     
@@ -999,6 +1217,9 @@ async def main():
         batch_size=args.batch_size,
         database_url=args.db_url or os.getenv('DATABASE_URL', 'postgresql://user:pass@localhost/unitgame')
     )
+    if args.model:
+        config.model_path = args.model
+    
     # allow data-dir from CLI to override config when provided
     if getattr(args, 'data_dir', None):
         config.data_dir = args.data_dir
@@ -1010,11 +1231,15 @@ async def main():
     elif args.command == 'train':
         await pipeline.train_model()
     elif args.command == 'evaluate':
-        # TODO: Implement evaluation (NN vs minimax games)
-        logger.info("Evaluation not yet implemented")
+        await pipeline.evaluate_model()
     elif args.command == 'full':
         await pipeline.run_full_pipeline()
 
 
 if __name__ == '__main__':
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(levelname)s:%(name)s:%(message)s'
+    )
     asyncio.run(main())

@@ -4,12 +4,16 @@ import './App.css';
 import UnitGame from './components/UnitGame';
 import PaymentModal from './components/PaymentModal';
 import { checkPremiumStatus, hasPlayedToday, recordPlayToday } from './services/paymentService';
+import MultiplayerLobby from './components/MultiplayerLobby';
+import { MatchInfo } from './services/multiplayerService';
 
 const App: React.FC = () => {
     const [isPremium, setIsPremium] = React.useState<boolean>(false);
     const [showPaywall, setShowPaywall] = React.useState<boolean>(false);
     const [hasPlayedDaily, setHasPlayedDaily] = React.useState<boolean>(false);
     const [isLoading, setIsLoading] = React.useState<boolean>(true);
+    const [gameMode, setGameMode] = React.useState<'single' | 'multiplayer'>('single');
+    const [matchInfo, setMatchInfo] = React.useState<MatchInfo | null>(null);
 
     // Check premium status on mount
     React.useEffect(() => {
@@ -88,10 +92,25 @@ const App: React.FC = () => {
 
     return (
         <div className="app-container">
-            <UnitGame
-                onGameStart={handleGameStart}
-                isPremium={isPremium}
-            />
+            {gameMode === 'multiplayer' && !matchInfo ? (
+                <MultiplayerLobby
+                    onMatchFound={(info) => setMatchInfo(info)}
+                    onCancel={() => setGameMode('single')}
+                />
+            ) : (
+                <UnitGame
+                    onGameStart={handleGameStart}
+                    isPremium={isPremium}
+                    onMultiplayerSelect={() => {
+                        if (isPremium) {
+                            setGameMode('multiplayer');
+                        } else {
+                            setShowPaywall(true);
+                        }
+                    }}
+                    matchInfo={matchInfo}
+                />
+            )}
 
             <PaymentModal
                 isOpen={showPaywall}

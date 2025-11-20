@@ -16,14 +16,15 @@
     "react-babylonjs": "latest",
     "react-dom": "latest",
     "react-scripts": "^5.0.1",
+    "socket.io-client": "^4.8.1",
     "typescript": "latest",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
+    "@types/jest": "latest",
     "@types/msgpack-lite": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@types/jest": "latest",
     "@types/uuid": "^9.0.7"
   },
   "scripts": {

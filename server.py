@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask_socketio import SocketIO
 import sys
 import os
 import logging
@@ -18,9 +19,14 @@ from self_play.greedy_banker import select_move as banker_select
 from self_play.greedy_algorithm import select_move as greedy_select
 from self_play.greedy_aggressor import select_move as aggressor_select
 from database import init_database, get_or_create_user, update_premium_status, check_premium_status
+from game_recorder import init_game_tables, create_game, record_move, complete_game, export_games_to_training_format
+from multiplayer_server import init_multiplayer
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
+# Initialize SocketIO with CORS support
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +39,7 @@ STRIPE_PRICE_ID = os.getenv('STRIPE_PRICE_ID')  # You'll need to create a produc
 
 # Initialize database
 init_database()
+init_game_tables()
 logger.info("Database initialized")
 
 @app.route('/health', methods=['GET'])
@@ -183,7 +190,99 @@ def stripe_webhook():
     return jsonify({"status": "success"}), 200
 
 
+@app.route('/api/game/create', methods=['POST'])
+def create_game_endpoint():
+    """Create a new game record to start recording moves."""
+    try:
+        data = request.json
+        game_id = data.get('gameId')
+        initial_state = data.get('initialState')
+        player1_device = data.get('player1Device') or data.get('deviceId')
+        player2_device = data.get('player2Device', 'AI')
+        game_mode = data.get('gameMode', 'pvp')  # 'pvp' or 'pva' (vs AI)
+        
+        if not game_id or not initial_state or not player1_device:
+            return jsonify({"error": "Missing required fields"}), 400
+        
+        game = create_game(game_id, initial_state, player1_device, player2_device, game_mode)
+        return jsonify(game), 201
+    
+    except Exception as e:
+        logger.error(f"Error creating game: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/game/<game_id>/move', methods=['POST'])
+def record_move_endpoint(game_id):
+    """Record a move in an ongoing game."""
+    try:
+        data = request.json
+        move_number = data.get('moveNumber')
+        player_id = data.get('playerId')
+        action = data.get('action')
+        state_before = data.get('stateBefore')  # Optional, but recommended for training
+        
+        if move_number is None or not player_id or not action:
+            return jsonify({"error": "Missing required fields"}), 400
+        
+        record_move(game_id, move_number, player_id, action, state_before)
+        return jsonify({"status": "recorded"}), 200
+    
+    except Exception as e:
+        logger.error(f"Error recording move: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/game/<game_id>/complete', methods=['POST'])
+def complete_game_endpoint(game_id):
+    """Mark a game as complete with final result."""
+    try:
+        data = request.json
+        winner = data.get('winner')  # 'Player1', 'Player2', or None for draw
+        total_moves = data.get('totalMoves')
+        
+        if total_moves is None:
+            return jsonify({"error": "Missing totalMoves"}), 400
+        
+        complete_game(game_id, winner, total_moves)
+        return jsonify({"status": "completed"}), 200
+    
+    except Exception as e:
+        logger.error(f"Error completing game: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/training/export-games', methods=['GET'])
+def export_training_data():
+    """Export human games for training (admin/internal use)."""
+    try:
+        limit = int(request.args.get('limit', 1000))
+        compress = request.args.get('compress', 'true').lower() == 'true'
+        
+        games = export_games_to_training_format(limit=limit, compress_moves=compress)
+        
+        return jsonify({
+            "count": len(games),
+            "games": games
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error exporting training data: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+# Initialize database
+init_database()
+init_game_tables()
+
+# Initialize multiplayer WebSocket handlers
+init_multiplayer(socketio)
+
+logger.info("Database and multiplayer initialized")
+
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))
-    app.run(host='0.0.0.0', port=port)
-
+    # Use socketio.run instead of app.run for WebSocket support
+    socketio.run(app, host='0.0.0.0', port=port, debug=True)

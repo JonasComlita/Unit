@@ -10,14 +10,17 @@ import MobileHUD from './MobileHUD';
 import DebugPanel from './DebugPanel';
 import { VisualEffectsManager } from '../game/visualEffects';
 import { Vertex } from '../game/types';
+import { MatchInfo } from '../services/multiplayerService';
 
 
 interface UnitGameProps {
   onGameStart?: () => boolean;
   isPremium?: boolean;
+  onMultiplayerSelect?: () => void;
+  matchInfo?: MatchInfo | null;
 }
 
-const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false }) => {
+const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false, onMultiplayerSelect, matchInfo }) => {
   const scene = useScene();
   const vfxRef = useRef<VisualEffectsManager | null>(null);
   const [visualQuality, setVisualQuality] = useState<'low' | 'medium' | 'high'>(
@@ -58,7 +61,7 @@ const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false }) =
     }
   }, [scene, visualQuality]);
 
-  const { gameState, handleAction: baseHandleAction, undo, moveHistory, setDifficulty: setGameDifficulty } = useGame();
+  const { gameState, handleAction: baseHandleAction, undo, moveHistory, setDifficulty: setGameDifficulty } = useGame(matchInfo);
   const [activePhase, setActivePhase] = useState<ActionPhase | null>(null);
 
   // Enhanced handleAction with VFX
@@ -191,16 +194,17 @@ const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false }) =
 
     // Combat actions (when a vertex is already selected)
     if (selectedVertexId) {
-      if (validAttackTargets.includes(vertexId)) {
+      // Check pincer FIRST, because a pincer target is also a valid attack target
+      if (validPincerTargets && validPincerTargets[vertexId] && validPincerTargets[vertexId].includes(selectedVertexId)) {
+        handleAction({ type: 'pincer', targetId: vertexId, originIds: validPincerTargets[vertexId] });
+        setActivePhase(null);
+        return;
+      } else if (validAttackTargets.includes(vertexId)) {
         handleAction({ type: 'attack', vertexId: selectedVertexId, targetId: vertexId });
         setActivePhase(null);
         return;
       } else if (validMoveTargets.includes(vertexId)) {
         handleAction({ type: 'move', fromId: selectedVertexId, toId: vertexId });
-        setActivePhase(null);
-        return;
-      } else if (validPincerTargets && validPincerTargets[vertexId] && validPincerTargets[vertexId].includes(selectedVertexId)) {
-        handleAction({ type: 'pincer', targetId: vertexId, originIds: validPincerTargets[vertexId] });
         setActivePhase(null);
         return;
       }
@@ -254,6 +258,13 @@ const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false }) =
     }
   };
 
+  // Auto-start if match found
+  useEffect(() => {
+    if (matchInfo) {
+      setGameStarted(true);
+    }
+  }, [matchInfo]);
+
   if (!gameStarted) {
     return (
       <div className="start-screen">
@@ -300,6 +311,21 @@ const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false }) =
           <button className="start-button" onClick={startGame}>
             ENTER THE ARENA
           </button>
+
+          {onMultiplayerSelect && (
+            <button
+              className="start-button multiplayer-btn"
+              onClick={onMultiplayerSelect}
+              style={{
+                marginTop: '1rem',
+                background: isPremium
+                  ? 'linear-gradient(45deg, #4a90e2, #003973)'
+                  : 'linear-gradient(45deg, #4a4a4a, #2a2a2a)'
+              }}
+            >
+              MULTIPLAYER {isPremium ? '' : '🔒'}
+            </button>
+          )}
         </div>
       </div>
     );

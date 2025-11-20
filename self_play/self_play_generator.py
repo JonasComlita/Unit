@@ -213,6 +213,7 @@ class SelfPlayGenerator:
         from .greedy_aggressor import select_move as aggressor_select
         from .greedy_banker import select_move as banker_select
         from .greedy_spreader import select_move as spreader_select
+        from .greedy_algorithm import select_move as algorithm_select
 
         # Record start timestamp for the game (ms)
         start_ms = int(time.time() * 1000)
@@ -242,7 +243,8 @@ class SelfPlayGenerator:
             league_opponents = [
                 ('aggressor', aggressor_select),
                 ('banker', banker_select),
-                ('spreader', spreader_select)
+                ('spreader', spreader_select),
+                ('algorithm', algorithm_select)
             ]
             opp_name, opp_fn = league_opponents[np.random.randint(len(league_opponents))]
             opponent_type = opp_name

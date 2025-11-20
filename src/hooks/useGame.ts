@@ -13,12 +13,29 @@ import {
 import { gameLogger } from '../services/gameLogger';
 import { Capacitor } from '@capacitor/core';
 import { GAME_RULES } from '../game/constants';
+import { multiplayerService, MatchInfo, OpponentMove } from '../services/multiplayerService';
 
 export type ActionPhase = 'placement' | 'infusion' | 'movement';
 
-export const useGame = () => {
+export const useGame = (matchInfo?: MatchInfo | null) => {
     // Load saved game from localStorage if available, else initialize
     const [gameState, setGameState] = useState<GameState>(() => {
+        // If multiplayer, always start fresh
+        if (matchInfo) {
+            const initialState = initializeGameState();
+            // If we are Player 1, we initialize the game state on the server
+            if (matchInfo.playerId === 'Player1') {
+                multiplayerService.initializeGameState(initialState);
+            }
+            const validActions = calculateValidActions(initialState);
+            // Start logging
+            const platform = Capacitor.isNativePlatform()
+                ? Capacitor.getPlatform() as 'ios' | 'android'
+                : 'web';
+            gameLogger.startGame(platform);
+            return { ...initialState, ...validActions };
+        }
+
         try {
             const raw = localStorage.getItem('currentGame');
             if (raw) {
@@ -96,7 +113,15 @@ export const useGame = () => {
         });
     };
 
-    const handleAction = useCallback((action: PlayerAction) => {
+    const handleAction = useCallback((action: PlayerAction, fromMultiplayer = false) => {
+        // Multiplayer check: prevent moves if not our turn (unless it's an update from the server)
+        if (matchInfo && !fromMultiplayer) {
+            if (gameState.currentPlayerId !== matchInfo.playerId) {
+                console.log('Not your turn!');
+                return;
+            }
+        }
+
         setGameState(prev => {
             // Push snapshot for undo (limit history to 50)
             try {
@@ -159,8 +184,7 @@ export const useGame = () => {
 
                         if (isHomeCorner) {
                             const newPiece: Piece = {
-                                id: `p-${Date.now()}`,
-                                player: prev.currentPlayerId
+                                id: `p-${Date.now()}`, player: prev.currentPlayerId
                             };
                             nextState.vertices[action.vertexId].stack.push(newPiece);
                             nextState.players[prev.currentPlayerId].reinforcements -= 1;
@@ -337,20 +361,30 @@ export const useGame = () => {
                     break;
 
                 case 'pincer':
-                    if (action.targetId &&
-                        Array.isArray(action.originIds) &&
-                        Object.keys(prev.validPincerTargets || {}).includes(action.targetId)) {
+                    // Determine origin IDs: use provided ones, or fallback to all valid origins for this target
+                    const targetId = action.targetId;
+                    const validPincerTargets = prev.validPincerTargets || {};
 
-                        const allowedOrigins = prev.validPincerTargets[action.targetId] || [];
-                        const allValid = action.originIds.every(id =>
+                    let originIds = action.originIds;
+                    if (!originIds && targetId && validPincerTargets[targetId]) {
+                        originIds = validPincerTargets[targetId];
+                    }
+
+                    if (targetId &&
+                        Array.isArray(originIds) &&
+                        Object.keys(validPincerTargets).includes(targetId)) {
+
+                        const allowedOrigins = validPincerTargets[targetId] || [];
+
+                        const allValid = originIds.every(id =>
                             allowedOrigins.includes(id) &&
                             prev.vertices[id].stack.length > 0 &&
                             prev.vertices[id].stack[0].player === prev.currentPlayerId
                         );
 
                         if (allValid) {
-                            const defenderV = nextState.vertices[action.targetId];
-                            const originVerts = action.originIds.map(id => nextState.vertices[id]);
+                            const defenderV = nextState.vertices[targetId];
+                            const originVerts = originIds.map(id => nextState.vertices[id]);
 
                             let attackerForce = originVerts.map(getForce).reduce((a, b) => a * b, 1);
                             attackerForce = Math.min(attackerForce, GAME_RULES.forceCapMax);
@@ -385,6 +419,7 @@ export const useGame = () => {
                                 defenderV.energy = newEnergy;
                             }
 
+                            // Clear all origin vertices
                             originVerts.forEach(v => {
                                 v.stack = [];
                                 v.energy = 0;
@@ -434,9 +469,20 @@ export const useGame = () => {
 
             // Calculate valid actions for next state
             const validActions = calculateValidActions(nextState);
+
+            // If multiplayer and this was a local move, send to server
+            if (matchInfo && !fromMultiplayer) {
+                multiplayerService.makeMove(action, prev);
+
+                // If game over, notify server
+                if (nextState.winner) {
+                    multiplayerService.gameOver(nextState.winner, nextState.turn.turnNumber || 0);
+                }
+            }
+
             return { ...nextState, ...validActions };
         });
-    }, []);
+    }, [matchInfo, gameState.currentPlayerId]);
 
     // Sync pending games on mount
     useEffect(() => {
@@ -461,6 +507,28 @@ export const useGame = () => {
         }
     }, [gameState]);
 
+    // Multiplayer Event Listeners
+    useEffect(() => {
+        if (!matchInfo) return;
+
+        const handleOpponentMove = (data: OpponentMove) => {
+            handleAction(data.action, true);
+        };
+
+        const handleGameEnded = (data: { winner: string | null }) => {
+            // Handle game end if needed (already handled by state update but good for sync)
+            console.log('Multiplayer game ended:', data.winner);
+        };
+
+        multiplayerService.on('opponent_move', handleOpponentMove);
+        multiplayerService.on('game_ended', handleGameEnded);
+
+        return () => {
+            multiplayerService.off('opponent_move', handleOpponentMove);
+            multiplayerService.off('game_ended', handleGameEnded);
+        };
+    }, [matchInfo, handleAction]);
+
     // Difficulty state
     const [difficulty, setDifficulty] = useState<'very_easy' | 'easy' | 'medium' | 'hard' | 'very_hard'>('medium');
     const [isAiThinking, setIsAiThinking] = useState(false);
@@ -468,8 +536,8 @@ export const useGame = () => {
     // AI Turn Logic
     useEffect(() => {
         const performAiMove = async () => {
-            // AI is Player 2
-            if (gameState.currentPlayerId === 'Player2' && !gameState.winner && !isAiThinking) {
+            // AI is Player 2 (Only in Single Player)
+            if (!matchInfo && gameState.currentPlayerId === 'Player2' && !gameState.winner && !isAiThinking) {
                 setIsAiThinking(true);
                 try {
                     // Small delay for better UX

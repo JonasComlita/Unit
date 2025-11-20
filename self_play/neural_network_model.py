@@ -26,7 +26,7 @@ class UnitGameNet(nn.Module):
     """
     
     def __init__(self, 
-                 num_vertices: int = 83,  # Total vertices in game
+                 num_vertices: int = 117,  # Total vertices in game (3²+5²+7²+5²+3²)
                  num_layers: int = 5,
                  board_channels: int = 32,
                  policy_channels: int = 5,  # place, infuse, move, attack, pincer
@@ -59,19 +59,21 @@ class UnitGameNet(nn.Module):
         self.node_policy_head = nn.Sequential(
             nn.Linear(self.node_embed_dim, 128),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
             nn.Linear(128, policy_channels)  # logits per action type for each node
         )
 
         # Value head: pool node embeddings to a graph embedding then predict scalar value
+        # Note: No final activation (Tanh removed) - outputs unbounded values for MSE loss
+        # Tanh causes vanishing gradients at extreme values (-1, +1) which are common in our targets
+        # Input is 64-dim (32 from mean pool + 32 from max pool)
         self.value_head = nn.Sequential(
-            nn.Linear(self.node_embed_dim, 256),
+            nn.Linear(self.node_embed_dim * 2, 256),  # * 2 for mean+max concatenation
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
             nn.Linear(256, 64),
             nn.ReLU(),
-            nn.Linear(64, 1),
-            nn.Tanh()
+            nn.Linear(64, 1)
         )
     
     def forward(self, x: Optional[torch.Tensor] = None, data: Optional[object] = None, edge_index: Optional[torch.Tensor] = None, batch_vec: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -127,20 +129,30 @@ class UnitGameNet(nn.Module):
                 # Fallback: return node_logits directly (caller can handle per-node logits)
                 policy = node_logits
 
-            # Graph-level value pooling
+            # Graph-level value pooling (mean + max)
             if global_mean_pool is None:
                 # manual pooling
                 batch_size = int(batch_vec.max().item()) + 1 if batch_vec is not None and batch_vec.numel() > 0 else 1
-                pooled = torch.zeros((batch_size, h.size(-1)), device=h.device)
+                pooled_mean = torch.zeros((batch_size, h.size(-1)), device=h.device)
+                pooled_max = torch.full((batch_size, h.size(-1)), float('-inf'), device=h.device)
                 counts = torch.zeros(batch_size, device=h.device)
                 for n_idx in range(h.size(0)):
                     b = int(batch_vec[n_idx].item()) if batch_vec is not None else 0
-                    pooled[b] += h[n_idx]
+                    pooled_mean[b] += h[n_idx]
+                    pooled_max[b] = torch.max(pooled_max[b], h[n_idx])
                     counts[b] += 1
                 counts = counts.clamp_min(1.0).unsqueeze(-1)
-                pooled = pooled / counts
+                pooled_mean = pooled_mean / counts
+                pooled_max = torch.where(pooled_max.isinf(), torch.zeros_like(pooled_max), pooled_max)
+                pooled = torch.cat([pooled_mean, pooled_max], dim=1)
             else:
-                pooled = global_mean_pool(h, batch_vec)
+                try:
+                    from torch_geometric.nn import global_max_pool
+                    pooled_mean = global_mean_pool(h, batch_vec)
+                    pooled_max = global_max_pool(h, batch_vec)
+                    pooled = torch.cat([pooled_mean, pooled_max], dim=1)
+                except ImportError:
+                    pooled = global_mean_pool(h, batch_vec)
 
             value = self.value_head(pooled)
             return policy, value
@@ -185,17 +197,29 @@ class UnitGameNet(nn.Module):
         policy = node_logits.view(batch_size, num_nodes * node_logits.size(-1))
         policy = F.softmax(policy, dim=1)
 
+        # Use both mean and max pooling to preserve more information
+        # Mean pooling alone washes out differences over 117 vertices
         if global_mean_pool is None:
-            pooled = torch.zeros((batch_size, h.size(-1)), device=device)
+            pooled_mean = torch.zeros((batch_size, h.size(-1)), device=device)
+            pooled_max = torch.full((batch_size, h.size(-1)), float('-inf'), device=device)
             counts = torch.zeros(batch_size, device=device)
             for n_idx in range(h.size(0)):
                 b = int(batch_vec[n_idx].item())
-                pooled[b] += h[n_idx]
+                pooled_mean[b] += h[n_idx]
+                pooled_max[b] = torch.max(pooled_max[b], h[n_idx])
                 counts[b] += 1
             counts = counts.clamp_min(1.0).unsqueeze(-1)
-            pooled = pooled / counts
+            pooled_mean = pooled_mean / counts
+            pooled_max = torch.where(pooled_max.isinf(), torch.zeros_like(pooled_max), pooled_max)
+            pooled = torch.cat([pooled_mean, pooled_max], dim=1)  # [batch, 64]
         else:
-            pooled = global_mean_pool(h, batch_vec)
+            try:
+                from torch_geometric.nn import global_max_pool
+                pooled_mean = global_mean_pool(h, batch_vec)
+                pooled_max = global_max_pool(h, batch_vec)
+                pooled = torch.cat([pooled_mean, pooled_max], dim=1)
+            except ImportError:
+                pooled = global_mean_pool(h, batch_vec)
 
         value = self.value_head(pooled)
         return policy, value
@@ -317,7 +341,8 @@ class UnitGameTrainer:
                         policy_pred, value_pred = self.model(states, edge_index=edge_index_tensor, batch_vec=batch_vec_tensor)
                     policy_loss = F.cross_entropy(policy_pred, policy_targets)
                     value_loss = F.mse_loss(value_pred.squeeze(), value_targets)
-                    total_loss = policy_loss + value_loss
+                    # Scale value loss to balance gradient contributions (value loss is smaller in magnitude)
+                    total_loss = policy_loss + 5.0 * value_loss
 
                 # scale gradients
                 self._scaler.scale(total_loss).backward()
@@ -332,7 +357,7 @@ class UnitGameTrainer:
                         policy_pred, value_pred = self.model(states, edge_index=edge_index_tensor, batch_vec=batch_vec_tensor)
                     policy_loss = F.cross_entropy(policy_pred, policy_targets)
                     value_loss = F.mse_loss(value_pred.squeeze(), value_targets)
-                    total_loss = policy_loss + value_loss
+                    total_loss = policy_loss + 5.0 * value_loss
 
                 self._scaler.scale(total_loss).backward()
                 self._scaler.step(self.optimizer)
@@ -344,7 +369,7 @@ class UnitGameTrainer:
                 policy_pred, value_pred = self.model(states, edge_index=edge_index_tensor, batch_vec=batch_vec_tensor)
             policy_loss = F.cross_entropy(policy_pred, policy_targets)
             value_loss = F.mse_loss(value_pred.squeeze(), value_targets)
-            total_loss = policy_loss + value_loss
+            total_loss = policy_loss + 5.0 * value_loss
             total_loss.backward()
             self.optimizer.step()
 
@@ -363,7 +388,7 @@ class UnitGameTrainer:
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-def state_to_tensor(game_state: dict, num_vertices: int = 83) -> np.ndarray:
+def state_to_tensor(game_state: dict, num_vertices: int = 117) -> np.ndarray:
     """
     Convert game state dictionary to neural network input tensor
     
@@ -378,7 +403,11 @@ def state_to_tensor(game_state: dict, num_vertices: int = 83) -> np.ndarray:
     
     current_player = game_state['currentPlayerId']
     
-    for i, (vertex_id, vertex) in enumerate(game_state['vertices'].items()):
+    # Sort vertices by ID to ensure consistent mapping to tensor rows
+    # Assumes IDs are like "v0", "v1", etc.
+    sorted_vertices = sorted(game_state['vertices'].items(), key=lambda x: int(x[0][1:]))
+    
+    for i, (vertex_id, vertex) in enumerate(sorted_vertices):
         if i >= num_vertices:
             break
         

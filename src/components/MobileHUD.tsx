@@ -46,7 +46,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
   const [quickHelpRightPx, setQuickHelpRightPx] = useState<number | null>(384);
   const [panelState, setPanelState] = useState<PanelState>('default');
   const [message, setMessage] = useState<string | null>(null);
-  const [activeAction, setActiveAction] = useState<'move' | 'attack' | 'infuse' | null>(null);
+  const [activeAction, setActiveAction] = useState<'move' | 'attack' | 'infuse' | 'pincer' | null>(null);
 
   const allMandatoryDone = turn.hasPlaced && turn.hasInfused && turn.hasMoved;
   const playerColor = currentPlayerId === 'Player1' ? '#4A90E2' : '#D0021B';
@@ -108,7 +108,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
     };
   }, []);
 
-  const handleActionClick = (action: 'move' | 'attack' | 'infuse') => {
+  const handleActionClick = (action: 'move' | 'attack' | 'infuse' | 'pincer') => {
     if (action === 'move' && turn.hasMoved) {
       setMessage('You have already moved this turn!');
       return;
@@ -128,6 +128,11 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
   const canAttack = selectedVertexId && validAttackTargets.length > 0;
   const canMove = selectedVertexId && validMoveTargets.length > 0 && !turn.hasMoved;
   const canInfuse = !turn.hasInfused;
+  // Check if selected vertex can participate in any pincer attacks
+  const canPincer = selectedVertexId && gameState.validPincerTargets &&
+    Object.entries(gameState.validPincerTargets).some(([targetId, originIds]) =>
+      originIds.includes(selectedVertexId)
+    );
 
   return (
     <>
@@ -741,7 +746,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
               {/* Contextual Actions */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
+                gridTemplateColumns: canPincer ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)',
                 gap: '10px',
               }}>
                 <button
@@ -797,6 +802,31 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                   <span style={{ fontSize: '24px' }}>⚔️</span>
                   <span>ATTACK</span>
                 </button>
+
+                {canPincer && (
+                  <button
+                    onClick={() => handleActionClick('pincer')}
+                    style={{
+                      minHeight: '65px',
+                      background: 'linear-gradient(135deg, rgba(153,50,204,0.9) 0%, rgba(138,43,226,0.9) 100%)',
+                      border: '2px solid rgba(255,255,255,0.3)',
+                      borderRadius: '10px',
+                      color: 'white',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    <span style={{ fontSize: '24px' }}>🗡️</span>
+                    <span>PINCER</span>
+                  </button>
+                )}
 
                 <button
                   onClick={() => handleActionClick('infuse')}
@@ -909,21 +939,25 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                   ? 'linear-gradient(135deg, rgba(0,206,209,0.3) 0%, rgba(0,139,139,0.3) 100%)'
                   : activeAction === 'attack'
                     ? 'linear-gradient(135deg, rgba(220,20,60,0.3) 0%, rgba(139,0,0,0.3) 100%)'
-                    : 'linear-gradient(135deg, rgba(255,191,0,0.3) 0%, rgba(255,140,0,0.3) 100%)',
+                    : activeAction === 'pincer'
+                      ? 'linear-gradient(135deg, rgba(153,50,204,0.3) 0%, rgba(138,43,226,0.3) 100%)'
+                      : 'linear-gradient(135deg, rgba(255,191,0,0.3) 0%, rgba(255,140,0,0.3) 100%)',
                 border: `3px solid ${activeAction === 'move' ? '#00CED1' :
-                  activeAction === 'attack' ? '#DC143C' : '#FFD700'
+                  activeAction === 'attack' ? '#DC143C' :
+                    activeAction === 'pincer' ? '#9932CC' : '#FFD700'
                   }`,
                 borderRadius: '12px',
                 padding: '20px',
                 textAlign: 'center',
               }}>
                 <div style={{ fontSize: '48px', marginBottom: '12px' }}>
-                  {activeAction === 'move' ? '➡️' : activeAction === 'attack' ? '⚔️' : '⚡'}
+                  {activeAction === 'move' ? '➡️' : activeAction === 'attack' ? '⚔️' : activeAction === 'pincer' ? '🗡️' : '⚡'}
                 </div>
                 <div style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
                   {activeAction === 'move' ? 'Select Move Destination' :
                     activeAction === 'attack' ? 'Select Attack Target' :
-                      'Select Unit to Infuse'}
+                      activeAction === 'pincer' ? 'Select Pincer Target' :
+                        'Select Unit to Infuse'}
                 </div>
                 <div style={{
                   color: 'rgba(255,255,255,0.8)',
@@ -932,6 +966,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                 }}>
                   {activeAction === 'move' && 'Tap a highlighted tile to move'}
                   {activeAction === 'attack' && 'Tap an enemy unit to attack'}
+                  {activeAction === 'pincer' && 'Tap a highlighted enemy to execute pincer attack'}
                   {activeAction === 'infuse' && 'Tap a friendly unit to add energy'}
                 </div>
                 <button

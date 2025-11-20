@@ -1,0 +1,12 @@
+
+> unit-strategy-game@1.0.0 build
+> react-scripts build
+
+Creating an optimized production build...
+Failed to compile.
+
+[eslint] 
+src/hooks/useGame.ts
+Syntax error: Module declaration names may only use ' or " quoted strings (1:2)
+
+
