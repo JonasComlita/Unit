@@ -6,7 +6,9 @@ import logging
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 
-from .agent_utils import get_legal_moves, apply_move, evaluate_position
+from .agent_utils import get_legal_moves, apply_move
+from .heuristics import evaluate_combined
+from .dynamic_agent import select_weights
 
 logger = logging.getLogger(__name__)
 
@@ -187,8 +189,9 @@ class MCTSAgent:
             move = random.choice(legal_moves)
             curr_state = apply_move(curr_state, move)
 
-        # Heuristic evaluation (Player1 perspective)
-        score = evaluate_position(curr_state, perspective='Player1')
+        # Heuristic evaluation using dynamic weights (Player1 perspective)
+        weights = select_weights(curr_state, 'Player1')
+        score = evaluate_combined(curr_state, 'Player1', weights)
         return math.tanh(score / 100.0) 
 
     def _backpropagate(self, node: MCTSNode, value: float, root_player: str):

@@ -21,11 +21,22 @@ def init_database():
             device_id TEXT UNIQUE NOT NULL,
             stripe_customer_id TEXT,
             is_premium BOOLEAN DEFAULT 0,
+            premium_type TEXT,
             premium_until TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # Check if premium_type column exists (migration for existing db)
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [info[1] for info in cursor.fetchall()]
+    if 'premium_type' not in columns:
+        try:
+            cursor.execute('ALTER TABLE users ADD COLUMN premium_type TEXT')
+            logger.info("Added premium_type column to users table")
+        except Exception as e:
+            logger.error(f"Error adding premium_type column: {e}")
     
     # Create index on device_id for faster lookups
     cursor.execute('''
@@ -57,7 +68,7 @@ def get_or_create_user(device_id: str) -> Dict[str, Any]:
     
     # Try to get existing user
     cursor.execute(
-        'SELECT id, device_id, stripe_customer_id, is_premium, premium_until FROM users WHERE device_id = ?',
+        'SELECT id, device_id, stripe_customer_id, is_premium, premium_until, premium_type FROM users WHERE device_id = ?',
         (device_id,)
     )
     row = cursor.fetchone()
@@ -68,7 +79,8 @@ def get_or_create_user(device_id: str) -> Dict[str, Any]:
             'device_id': row[1],
             'stripe_customer_id': row[2],
             'is_premium': bool(row[3]),
-            'premium_until': row[4]
+            'premium_until': row[4],
+            'premium_type': row[5]
         }
     else:
         # Create new user
@@ -83,7 +95,8 @@ def get_or_create_user(device_id: str) -> Dict[str, Any]:
             'device_id': device_id,
             'stripe_customer_id': None,
             'is_premium': False,
-            'premium_until': None
+            'premium_until': None,
+            'premium_type': None
         }
         logger.info(f"Created new user with device_id: {device_id}")
     
@@ -91,7 +104,7 @@ def get_or_create_user(device_id: str) -> Dict[str, Any]:
     return user
 
 
-def update_premium_status(device_id: str, is_premium: bool, stripe_customer_id: Optional[str] = None, premium_until: Optional[str] = None):
+def update_premium_status(device_id: str, is_premium: bool, stripe_customer_id: Optional[str] = None, premium_until: Optional[str] = None, premium_type: Optional[str] = None):
     """
     Update user's premium status.
     
@@ -100,6 +113,7 @@ def update_premium_status(device_id: str, is_premium: bool, stripe_customer_id: 
         is_premium: Premium status
         stripe_customer_id: Stripe customer ID (optional)
         premium_until: Expiration timestamp (optional, for subscriptions)
+        premium_type: Type of premium ('unlimited' or 'multiplayer')
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -114,6 +128,10 @@ def update_premium_status(device_id: str, is_premium: bool, stripe_customer_id: 
     if premium_until:
         update_fields.append('premium_until = ?')
         params.append(premium_until)
+        
+    if premium_type:
+        update_fields.append('premium_type = ?')
+        params.append(premium_type)
     
     params.append(device_id)
     
@@ -122,10 +140,10 @@ def update_premium_status(device_id: str, is_premium: bool, stripe_customer_id: 
     conn.commit()
     conn.close()
     
-    logger.info(f"Updated premium status for device_id {device_id}: is_premium={is_premium}")
+    logger.info(f"Updated premium status for device_id {device_id}: is_premium={is_premium}, type={premium_type}")
 
 
-def check_premium_status(device_id: str) -> bool:
+def check_premium_status(device_id: str) -> Dict[str, Any]:
     """
     Check if a user has premium status.
     
@@ -133,7 +151,7 @@ def check_premium_status(device_id: str) -> bool:
         device_id: Unique device identifier
         
     Returns:
-        True if user is premium, False otherwise
+        Dict with is_premium and premium_type
     """
     user = get_or_create_user(device_id)
     
@@ -144,11 +162,14 @@ def check_premium_status(device_id: str) -> bool:
             if datetime.now() > premium_until:
                 # Premium expired, update status
                 update_premium_status(device_id, False)
-                return False
+                return {'is_premium': False, 'premium_type': None}
         except (ValueError, TypeError):
             pass
     
-    return user['is_premium']
+    return {
+        'is_premium': user['is_premium'],
+        'premium_type': user['premium_type']
+    }
 
 
 def get_user_by_stripe_customer(stripe_customer_id: str) -> Optional[Dict[str, Any]]:

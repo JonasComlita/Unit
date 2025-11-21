@@ -9,6 +9,7 @@ import { MatchInfo } from './services/multiplayerService';
 
 const App: React.FC = () => {
     const [isPremium, setIsPremium] = React.useState<boolean>(false);
+    const [premiumType, setPremiumType] = React.useState<string | null>(null);
     const [showPaywall, setShowPaywall] = React.useState<boolean>(false);
     const [hasPlayedDaily, setHasPlayedDaily] = React.useState<boolean>(false);
     const [isLoading, setIsLoading] = React.useState<boolean>(true);
@@ -19,10 +20,11 @@ const App: React.FC = () => {
     React.useEffect(() => {
         const checkStatus = async () => {
             try {
-                const premium = await checkPremiumStatus();
-                setIsPremium(premium);
+                const status = await checkPremiumStatus();
+                setIsPremium(status.isPremium);
+                setPremiumType(status.premiumType);
 
-                if (!premium) {
+                if (!status.isPremium) {
                     const playedToday = hasPlayedToday();
                     setHasPlayedDaily(playedToday);
                 }
@@ -43,10 +45,11 @@ const App: React.FC = () => {
 
         if (paymentStatus === 'success') {
             // Payment successful, re-check premium status
-            checkPremiumStatus().then(premium => {
-                setIsPremium(premium);
-                if (premium) {
-                    alert('🎉 Payment successful! You now have unlimited access!');
+            checkPremiumStatus().then(status => {
+                setIsPremium(status.isPremium);
+                setPremiumType(status.premiumType);
+                if (status.isPremium) {
+                    alert('🎉 Payment successful! You now have access!');
                 }
             });
             // Clean up URL
@@ -102,7 +105,7 @@ const App: React.FC = () => {
                     onGameStart={handleGameStart}
                     isPremium={isPremium}
                     onMultiplayerSelect={() => {
-                        if (isPremium) {
+                        if (premiumType === 'multiplayer') {
                             setGameMode('multiplayer');
                         } else {
                             setShowPaywall(true);

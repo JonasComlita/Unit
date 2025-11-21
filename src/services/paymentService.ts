@@ -22,7 +22,7 @@ export function getDeviceId(): string {
 /**
  * Check if the current user has premium status
  */
-export async function checkPremiumStatus(): Promise<boolean> {
+export async function checkPremiumStatus(): Promise<{ isPremium: boolean, premiumType: string | null }> {
     try {
         const deviceId = getDeviceId();
         const response = await fetch(`${API_BASE_URL}/api/user/premium-status?deviceId=${encodeURIComponent(deviceId)}`);
@@ -32,17 +32,20 @@ export async function checkPremiumStatus(): Promise<boolean> {
         }
 
         const data = await response.json();
-        return data.isPremium || false;
+        return {
+            isPremium: data.isPremium || false,
+            premiumType: data.premiumType || null
+        };
     } catch (error) {
         console.error('Error checking premium status:', error);
-        return false;
+        return { isPremium: false, premiumType: null };
     }
 }
 
 /**
  * Create a Stripe checkout session and redirect to payment
  */
-export async function createCheckoutSession(): Promise<void> {
+export async function createCheckoutSession(planType: 'unlimited' | 'multiplayer' = 'unlimited'): Promise<void> {
     try {
         const deviceId = getDeviceId();
 
@@ -51,7 +54,7 @@ export async function createCheckoutSession(): Promise<void> {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ deviceId }),
+            body: JSON.stringify({ deviceId, planType }),
         });
 
         if (!response.ok) {

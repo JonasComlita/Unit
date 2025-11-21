@@ -1,39 +1,15 @@
 from typing import Dict, Any, Optional
 from .agent_utils import get_legal_moves, apply_move
+from .heuristics import evaluate_combined
 
-def evaluate_aggressor(state: Dict[str, Any], perspective: str) -> float:
-    """
-    Aggressor Heuristic:
-    Maximize the difference between my material and enemy material.
-    Weights pieces higher than energy.
-    """
-    my_pieces = 0
-    my_energy = 0
-    enemy_pieces = 0
-    enemy_energy = 0
-    
-    vertices = state.get('vertices', {})
-    for vertex in vertices.values():
-        stack = vertex.get('stack', [])
-        if not stack:
-            continue
-            
-        owner = stack[0]['player']
-        count = len(stack)
-        energy = vertex.get('energy', 0)
-        
-        if owner == perspective:
-            my_pieces += count
-            my_energy += energy
-        else:
-            enemy_pieces += count
-            enemy_energy += energy
-            
-    # Heuristic from plan: (MyPieces - EnemyPieces) * 2.0 + (MyEnergy - EnemyEnergy) * 1.0
-    # We multiply by 10 to keep it somewhat consistent with other scores if compared, 
-    # but the relative value is what matters.
-    score = (my_pieces - enemy_pieces) * 20.0 + (my_energy - enemy_energy) * 1.0
-    return score
+AGGRESSOR_WEIGHTS = {
+    'h_mat': 1.0,
+    'h_force': 2.0,
+    'h_terr': 0.5,
+    'h_def': 0.5,
+    'h_off': 5.0,
+    'h_pin': 1.0
+}
 
 def select_move(game_state: Dict[str, Any], perspective: Optional[str] = None) -> Dict:
     legal = get_legal_moves(game_state)
@@ -46,7 +22,7 @@ def select_move(game_state: Dict[str, Any], perspective: Optional[str] = None) -
     
     for mv in legal:
         new_state = apply_move(game_state, mv)
-        score = evaluate_aggressor(new_state, mover)
+        score = evaluate_combined(new_state, mover, AGGRESSOR_WEIGHTS)
         if score > best_score:
             best_score = score
             best_move = mv

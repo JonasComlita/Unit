@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
 # Initialize Stripe
 stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
-STRIPE_PRICE_ID = os.getenv('STRIPE_PRICE_ID')  # You'll need to create a product/price in Stripe dashboard
+STRIPE_PRICE_UNLIMITED = os.getenv('STRIPE_PRICE_UNLIMITED', 'price_unlimited_placeholder')
+STRIPE_PRICE_MULTIPLAYER = os.getenv('STRIPE_PRICE_MULTIPLAYER', 'price_multiplayer_placeholder')
 
 # Initialize database
 init_database()
@@ -95,11 +96,12 @@ def get_premium_status():
         if not device_id:
             return jsonify({"error": "Missing deviceId"}), 400
         
-        is_premium = check_premium_status(device_id)
+        status = check_premium_status(device_id)
         user = get_or_create_user(device_id)
         
         return jsonify({
-            "isPremium": is_premium,
+            "isPremium": status['is_premium'],
+            "premiumType": status['premium_type'],
             "deviceId": device_id,
             "userId": user['id']
         })
@@ -115,6 +117,7 @@ def create_checkout_session():
     try:
         data = request.json
         device_id = data.get('deviceId')
+        plan_type = data.get('planType', 'unlimited')  # 'unlimited' or 'multiplayer'
         
         if not device_id:
             return jsonify({"error": "Missing deviceId"}), 400
@@ -122,24 +125,33 @@ def create_checkout_session():
         # Get or create user
         user = get_or_create_user(device_id)
         
+        # Determine price and mode based on plan type
+        if plan_type == 'multiplayer':
+            price_id = STRIPE_PRICE_MULTIPLAYER
+            mode = 'subscription'
+        else:
+            price_id = STRIPE_PRICE_UNLIMITED
+            mode = 'payment'
+        
         # Create Stripe checkout session
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
-                'price': STRIPE_PRICE_ID,
+                'price': price_id,
                 'quantity': 1,
             }],
-            mode='payment',  # One-time payment. Use 'subscription' for recurring
+            mode=mode,
             success_url=request.host_url + '?payment=success',
             cancel_url=request.host_url + '?payment=cancelled',
             client_reference_id=device_id,  # Store device_id for webhook
             metadata={
                 'device_id': device_id,
-                'user_id': user['id']
+                'user_id': user['id'],
+                'plan_type': plan_type
             }
         )
         
-        logger.info(f"Created checkout session for device_id: {device_id}")
+        logger.info(f"Created checkout session for device_id: {device_id}, plan: {plan_type}")
         
         return jsonify({
             "sessionId": checkout_session.id,
@@ -172,12 +184,13 @@ def stripe_webhook():
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
         device_id = session.get('client_reference_id') or session['metadata'].get('device_id')
+        plan_type = session['metadata'].get('plan_type', 'unlimited')
         
         if device_id:
             # Update user to premium
             stripe_customer_id = session.get('customer')
-            update_premium_status(device_id, True, stripe_customer_id)
-            logger.info(f"Payment successful for device_id: {device_id}")
+            update_premium_status(device_id, True, stripe_customer_id, premium_type=plan_type)
+            logger.info(f"Payment successful for device_id: {device_id}, plan: {plan_type}")
         else:
             logger.warning("Webhook received but no device_id found")
     

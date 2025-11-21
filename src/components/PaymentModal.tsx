@@ -14,12 +14,12 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, gamesPlaye
 
     if (!isOpen) return null;
 
-    const handleUpgrade = async () => {
+    const handleUpgrade = async (planType: 'unlimited' | 'multiplayer') => {
         setIsProcessing(true);
         setError(null);
 
         try {
-            await createCheckoutSession();
+            await createCheckoutSession(planType);
             // User will be redirected to Stripe Checkout
         } catch (err) {
             setError('Failed to start payment process. Please try again.');
@@ -44,10 +44,12 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, gamesPlaye
                 background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
                 borderRadius: '20px',
                 padding: '40px',
-                maxWidth: '500px',
-                width: '90%',
+                maxWidth: '900px',
+                width: '95%',
                 boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
                 border: '2px solid rgba(255, 255, 255, 0.1)',
+                maxHeight: '90vh',
+                overflowY: 'auto',
             }}>
                 {/* Header */}
                 <div style={{
@@ -62,78 +64,19 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, gamesPlaye
                     </div>
                     <h2 style={{
                         color: 'white',
-                        fontSize: '28px',
+                        fontSize: '32px',
                         margin: '0 0 10px 0',
                         fontWeight: 'bold',
                     }}>
-                        Upgrade to Premium
+                        Choose Your Plan
                     </h2>
                     <p style={{
                         color: 'rgba(255, 255, 255, 0.7)',
                         fontSize: '16px',
                         margin: 0,
                     }}>
-                        You've played your free game for today
+                        Unlock the full potential of Unit Strategy
                     </p>
-                </div>
-
-                {/* Features */}
-                <div style={{
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    borderRadius: '12px',
-                    padding: '25px',
-                    marginBottom: '30px',
-                }}>
-                    <h3 style={{
-                        color: 'white',
-                        fontSize: '20px',
-                        margin: '0 0 20px 0',
-                    }}>
-                        Premium Benefits
-                    </h3>
-                    <ul style={{
-                        listStyle: 'none',
-                        padding: 0,
-                        margin: 0,
-                    }}>
-                        {[
-                            '♾️ Unlimited games',
-                            '🎯 All difficulty levels',
-                            '💾 Save game progress',
-                            '🎨 Exclusive themes',
-                            '🏆 Leaderboard access',
-                        ].map((feature, index) => (
-                            <li key={index} style={{
-                                color: 'rgba(255, 255, 255, 0.9)',
-                                fontSize: '16px',
-                                padding: '10px 0',
-                                borderBottom: index < 4 ? '1px solid rgba(255, 255, 255, 0.1)' : 'none',
-                            }}>
-                                {feature}
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-
-                {/* Pricing */}
-                <div style={{
-                    textAlign: 'center',
-                    marginBottom: '25px',
-                }}>
-                    <div style={{
-                        fontSize: '48px',
-                        fontWeight: 'bold',
-                        color: '#4CAF50',
-                        marginBottom: '5px',
-                    }}>
-                        $4.99
-                    </div>
-                    <div style={{
-                        color: 'rgba(255, 255, 255, 0.6)',
-                        fontSize: '14px',
-                    }}>
-                        One-time payment • Lifetime access
-                    </div>
                 </div>
 
                 {/* Error Message */}
@@ -152,50 +95,131 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, gamesPlaye
                     </div>
                 )}
 
-                {/* Buttons */}
                 <div style={{
                     display: 'flex',
-                    gap: '12px',
+                    flexWrap: 'wrap',
+                    gap: '20px',
+                    justifyContent: 'center',
                 }}>
+                    {/* Unlimited Plan */}
+                    <div style={{
+                        flex: '1 1 300px',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        borderRadius: '16px',
+                        padding: '30px',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                    }}>
+                        <h3 style={{ color: 'white', margin: '0 0 10px 0' }}>Unlimited</h3>
+                        <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#4CAF50', marginBottom: '5px' }}>$1.00</div>
+                        <div style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '14px', marginBottom: '20px' }}>One-time payment</div>
+
+                        <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 30px 0', flex: 1 }}>
+                            {[
+                                '♾️ Unlimited single-player games',
+                                '🎯 All difficulty levels',
+                                '💾 Save game progress',
+                                '🚫 No ads',
+                            ].map((feature, i) => (
+                                <li key={i} style={{ color: 'rgba(255, 255, 255, 0.9)', padding: '8px 0', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>{feature}</li>
+                            ))}
+                        </ul>
+
+                        <button
+                            onClick={() => handleUpgrade('unlimited')}
+                            disabled={isProcessing}
+                            style={{
+                                width: '100%',
+                                padding: '15px',
+                                background: 'rgba(255, 255, 255, 0.1)',
+                                border: '2px solid rgba(76, 175, 80, 0.5)',
+                                borderRadius: '10px',
+                                color: '#4CAF50',
+                                fontSize: '16px',
+                                fontWeight: 'bold',
+                                cursor: isProcessing ? 'not-allowed' : 'pointer',
+                                transition: 'all 0.2s ease',
+                            }}
+                        >
+                            {isProcessing ? 'Processing...' : 'Get Unlimited'}
+                        </button>
+                    </div>
+
+                    {/* Multiplayer Plan */}
+                    <div style={{
+                        flex: '1 1 300px',
+                        background: 'linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(56, 142, 60, 0.1) 100%)',
+                        borderRadius: '16px',
+                        padding: '30px',
+                        border: '2px solid #4CAF50',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        position: 'relative',
+                    }}>
+                        <div style={{
+                            position: 'absolute',
+                            top: '-12px',
+                            right: '20px',
+                            background: '#4CAF50',
+                            color: 'white',
+                            padding: '4px 12px',
+                            borderRadius: '12px',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                        }}>
+                            BEST VALUE
+                        </div>
+                        <h3 style={{ color: 'white', margin: '0 0 10px 0' }}>Multiplayer Pro</h3>
+                        <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#4CAF50', marginBottom: '5px' }}>$5.00</div>
+                        <div style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '14px', marginBottom: '20px' }}>Per month</div>
+
+                        <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 30px 0', flex: 1 }}>
+                            {[
+                                '🌍 Online Multiplayer',
+                                '♾️ Everything in Unlimited',
+                                '🏆 Global Leaderboards',
+                                '🎨 Exclusive Themes',
+                                '⚡ Priority Server Access',
+                            ].map((feature, i) => (
+                                <li key={i} style={{ color: 'rgba(255, 255, 255, 0.9)', padding: '8px 0', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>{feature}</li>
+                            ))}
+                        </ul>
+
+                        <button
+                            onClick={() => handleUpgrade('multiplayer')}
+                            disabled={isProcessing}
+                            style={{
+                                width: '100%',
+                                padding: '15px',
+                                background: '#4CAF50',
+                                border: 'none',
+                                borderRadius: '10px',
+                                color: 'white',
+                                fontSize: '16px',
+                                fontWeight: 'bold',
+                                cursor: isProcessing ? 'not-allowed' : 'pointer',
+                                boxShadow: '0 4px 15px rgba(76, 175, 80, 0.4)',
+                                transition: 'all 0.2s ease',
+                            }}
+                        >
+                            {isProcessing ? 'Processing...' : 'Go Pro'}
+                        </button>
+                    </div>
+                </div>
+
+                <div style={{ textAlign: 'center', marginTop: '30px' }}>
                     <button
                         onClick={onClose}
-                        disabled={isProcessing}
                         style={{
-                            flex: 1,
-                            padding: '15px',
-                            background: 'rgba(255, 255, 255, 0.1)',
-                            border: '2px solid rgba(255, 255, 255, 0.2)',
-                            borderRadius: '10px',
-                            color: 'white',
-                            fontSize: '16px',
-                            fontWeight: 'bold',
-                            cursor: isProcessing ? 'not-allowed' : 'pointer',
-                            opacity: isProcessing ? 0.5 : 1,
-                            transition: 'all 0.2s ease',
-                        }}
-                    >
-                        Maybe Later
-                    </button>
-                    <button
-                        onClick={handleUpgrade}
-                        disabled={isProcessing}
-                        style={{
-                            flex: 1,
-                            padding: '15px',
-                            background: isProcessing
-                                ? 'linear-gradient(135deg, rgba(76, 175, 80, 0.5) 0%, rgba(56, 142, 60, 0.5) 100%)'
-                                : 'linear-gradient(135deg, #4CAF50 0%, #388E3C 100%)',
+                            background: 'transparent',
                             border: 'none',
-                            borderRadius: '10px',
-                            color: 'white',
-                            fontSize: '16px',
-                            fontWeight: 'bold',
-                            cursor: isProcessing ? 'not-allowed' : 'pointer',
-                            boxShadow: isProcessing ? 'none' : '0 4px 15px rgba(76, 175, 80, 0.4)',
-                            transition: 'all 0.2s ease',
+                            color: 'rgba(255, 255, 255, 0.5)',
+                            cursor: 'pointer',
+                            textDecoration: 'underline',
                         }}
                     >
-                        {isProcessing ? 'Processing...' : 'Upgrade Now'}
+                        No thanks, I'll stick to free daily games
                     </button>
                 </div>
 
