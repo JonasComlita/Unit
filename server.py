@@ -59,7 +59,7 @@ def get_ai_move():
     try:
         data = request.json
         game_state = data.get('gameState')
-        difficulty = data.get('difficulty', 5)  # Default to level 5
+        difficulty = data.get('difficulty', 1)  # Default to level 5
         
         if not game_state:
             return jsonify({"error": "Missing gameState"}), 400
@@ -110,19 +110,13 @@ def get_ai_move():
         elif difficulty == 7:
             # Level 7: Alpha-Beta (Depth 2)
             move = alpha_beta_select(game_state)
-        elif difficulty == 8:
-            # Level 8: Alpha-Beta (Depth 3) - slower but stronger
+        else: # difficulty == 8:
+            # Level 8: Alpha-Beta (Depth 3)
             import self_play.alpha_beta_agent as ab
             old_depth = ab.MAX_DEPTH
             ab.MAX_DEPTH = 3
             move = alpha_beta_select(game_state)
             ab.MAX_DEPTH = old_depth
-        elif difficulty == 9:
-            # Level 9: MCTS (20 simulations)
-            move = mcts_agent_20.select_move(game_state)
-        else:  # difficulty == 10
-            # Level 10: MCTS (50 simulations) - strongest but slowest
-            move = mcts_agent_50.select_move(game_state)
             
         return jsonify({"action": move})
 

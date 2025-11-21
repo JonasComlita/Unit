@@ -139,12 +139,31 @@ class MCTSAgent:
         """Expand the node by adding all legal moves as children."""
         legal_moves = get_legal_moves(state)
         num_moves = len(legal_moves)
+        
+        # Calculate heuristic scores for moves to set priors
+        move_scores = []
+        total_score = 0.0
+        
         for move in legal_moves:
+            score = 1.0 # Base score
+            
+            # Heuristic: Prioritize attacks and captures
+            if move['type'] == 'attack':
+                score += 2.0
+            elif move['type'] == 'infuse':
+                score += 0.5
+            elif move['type'] == 'move':
+                # Slight bonus for moving towards center or enemy (simplified)
+                score += 0.2
+                
+            move_scores.append(score)
+            total_score += score
+            
+        for i, move in enumerate(legal_moves):
             move_key = str(move) 
             if move_key not in node.children:
-                # Initialize with uniform prior if no policy provided
-                # If we had a policy network, we'd set it here.
-                prior = 1.0 / num_moves if num_moves > 0 else 0.0
+                # Use heuristic probability as prior
+                prior = move_scores[i] / total_score if total_score > 0 else 1.0 / num_moves
                 child = MCTSNode(parent=node, move=move, prior=prior)
                 node.children[move_key] = child
         node.is_expanded = True
@@ -170,23 +189,30 @@ class MCTSAgent:
         Otherwise, perform a rollout and use heuristic.
         """
         if self.eval_fn:
-            # Custom evaluator (e.g. Neural Net)
-            # Expected to return value in [-1, 1] from perspective of current player?
-            # Or absolute? Let's assume eval_fn returns value for 'Player1'.
             return self.eval_fn(state)
         
-        # Default Rollout + Heuristic
+        # Heuristic Rollout
         curr_state = copy.deepcopy(state)
         for _ in range(self.rollout_depth):
-            if curr_state.get('winner'):
+            winner = curr_state.get('winner')
+            if winner:
                 break
             
             legal_moves = get_legal_moves(curr_state)
             if not legal_moves:
                 break 
             
-            import random
-            move = random.choice(legal_moves)
+            # Heuristic: 80% chance to pick a "good" move, 20% random
+            if random.random() < 0.8:
+                # Simple heuristic for rollout: prefer attacks
+                attacks = [m for m in legal_moves if m['type'] == 'attack']
+                if attacks:
+                    move = random.choice(attacks)
+                else:
+                    move = random.choice(legal_moves)
+            else:
+                move = random.choice(legal_moves)
+                
             curr_state = apply_move(curr_state, move)
 
         # Heuristic evaluation using dynamic weights (Player1 perspective)

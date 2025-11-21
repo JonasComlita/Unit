@@ -16,7 +16,7 @@
 2. Click "Add Product"
 3. Fill in:
    - **Name:** Unit Strategy Game - Premium
-   - **Price:** $4.99 (one-time payment)
+   - **Price:** $1.00 (one-time payment). $5.00 (monthly payment).
 4. Save and copy the **Price ID** (starts with `price_`)
 
 ### 2. Update .env File
@@ -118,7 +118,7 @@ const API_BASE_URL = 'http://localhost:3001';
 ## 📝 Current Configuration
 
 - **Free games limit:** 1 game per day
-- **Price:** $4.99 (one-time payment)
+- **Price:** $1.00 (one-time payment). $5.00 (recurring payment for multi-player servers)
 - **Database:** SQLite (`game.db`)
 - **Backend port:** 3000
 - **Frontend:** React dev server

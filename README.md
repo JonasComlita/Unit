@@ -17,6 +17,7 @@ The ultimate goal is to eliminate all of the opponent's pieces from the board. A
 
 ### Occupation Requirement
 - A vertex can only be moved to if the source vertex meets the occupation requirements.
+- A vertex can only attack if the source vertex meets the occupation requirements.
 - **Requirements by Layer:**
 	- 3x3: minPieces=1, minEnergy=1, minForce=1
 	- 5x5: minPieces=1, minEnergy=1, minForce=4
@@ -24,7 +25,7 @@ The ultimate goal is to eliminate all of the opponent's pieces from the board. A
 
 ### Occupation Rules
 - Players must move friendly home corner vertices that are at the force cap of 10 to an empty vertex.
-- Players can not place a piece on a home corner that is occupied by the opponent.
+- Players can not place a piece on their home corner that is occupied by the opponent.
 
 ### Force
 - The strength of an occupied stack, used for combat.
@@ -42,6 +43,7 @@ The ultimate goal is to eliminate all of the opponent's pieces from the board. A
 ### Reinforcements
 - A pool of pieces available to each player for placement.
 - **Accrual:** Players receive 1 reinforcement piece at the start of their turn.
+- **Accrual:** Players receive 1 energy point at the start of their turn.
 
 ## Turn Structure
 - Each turn, a player MUST perform both a Place action and an Infuse action. The order is not important.
@@ -149,7 +151,7 @@ The ultimate goal is to eliminate all of the opponent's pieces from the board. A
 Run the self-play generator to create training data shards:
 
 ```bash
-python -m self_play.main --file-writer --shard-format parquet --shard-move-mode compressed --trim-states --random-start --shard-dir shards/v1_model_data --use-model --model-path checkpoints/best_model.pt --model-device cuda --game-version v1-nn
+./.venv311/bin/python -m self_play.main --num-workers 1 --file-writer --shard-format parquet --shard-move-mode compressed --trim-states --random-start --shard-dir shards/v1_model_data --model-device cuda --game-version v1-nn
 ```
 
 - **Shards Output Location:**
@@ -161,7 +163,7 @@ python -m self_play.main --file-writer --shard-format parquet --shard-move-mode 
 Use the training pipeline to train a neural network on the generated shards:
 
 ```bash
-python training_pipeline.py train --data-dir shards/v1_model_data --epochs 100 --batch-size 256
+./.venv311/bin/python -m self_play.training_pipeline train --data-dir shards/v1_model_data --epochs 100 --batch-size 256
 ```
 
 - **Training Data:**
@@ -171,12 +173,14 @@ python training_pipeline.py train --data-dir shards/v1_model_data --epochs 100 -
 	- Model checkpoints are saved in the `checkpoints/` directory.
 	- The best-performing model is saved as `checkpoints/best_model.pt`.
 
-## 3. Full Pipeline Example
+## 3. Continue to loop with new best_model.pt
 
 To run the full pipeline (generate data, train, and evaluate):
 
 ```bash
-python training_pipeline.py full --games 10000 --epochs 50
+./.venv311/bin/python -m self_play.main --use-gpu-inference-server  --num-workers 1 --file-writer --shard-format parquet --shard-move-mode compressed --trim-states --random-start --shard-dir shards/v2_model_data --use-model --model-path checkpoints/best_model.pt --model-device cuda --game-version v1-nn
+
+./.venv311/bin/python -m self_play.training_pipeline train --data-dir shards/v2_model_data --epochs 100 --batch-size 256
 ```
 
 ---
