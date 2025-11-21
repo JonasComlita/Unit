@@ -354,9 +354,10 @@ export const useGame = (matchInfo?: MatchInfo | null) => {
                             }
 
                             // End turn
-                            nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
-                            nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
-                            nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
+                            // nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
+                            // nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
+                            // nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
+                            nextState.turn.hasMoved = true;
                             nextState.selectedVertexId = null;
                             setMoveHistory([]);
                         } else {
@@ -431,9 +432,10 @@ export const useGame = (matchInfo?: MatchInfo | null) => {
                             });
 
                             // End turn
-                            nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
-                            nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
-                            nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
+                            // nextState.currentPlayerId = prev.currentPlayerId === 'Player1' ? 'Player2' : 'Player1';
+                            // nextState.players[nextState.currentPlayerId].reinforcements += GAME_RULES.reinforcementsPerTurn;
+                            // nextState.turn = { hasPlaced: false, hasInfused: false, hasMoved: false, turnNumber: (prev.turn?.turnNumber || 0) + 1 };
+                            nextState.turn.hasMoved = true;
                             nextState.selectedVertexId = null;
                             setMoveHistory([]);
                         }

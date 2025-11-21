@@ -230,7 +230,7 @@ export const calculateValidActions = (state: GameState): Partial<GameState> => {
         const selectedVertex = vertices[selectedVertexId];
         if (selectedVertex.stack[0]?.player === currentPlayerId) {
             // Attack targets
-            if (isOccupied(selectedVertex)) {
+            if (!turn.hasMoved && isOccupied(selectedVertex)) {
                 updates.validAttackTargets = selectedVertex.adjacencies.filter(id =>
                     vertices[id].stack.length > 0 &&
                     vertices[id].stack[0].player !== currentPlayerId

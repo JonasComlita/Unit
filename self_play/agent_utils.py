@@ -303,25 +303,27 @@ def apply_move(state: Dict[str, Any], move: Dict[str, Any]) -> Dict[str, Any]:
             defender['energy'] = new_def_energy
             
             # Return early to avoid common cleanup (which clears attacker)
-            new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
-            new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
-            new_state['turn'] = {
-                'hasPlaced': False,
-                'hasInfused': False,
-                'hasMoved': False,
-                'turnNumber': new_state['turn']['turnNumber'] + 1
-            }
+            # new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
+            # new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
+            # new_state['turn'] = {
+            #     'hasPlaced': False,
+            #     'hasInfused': False,
+            #     'hasMoved': False,
+            #     'turnNumber': new_state['turn']['turnNumber'] + 1
+            # }
+            new_state['turn']['hasMoved'] = True
             return new_state
 
         # Common cleanup for Win/Loss cases (turn end)
-        new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
-        new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
-        new_state['turn'] = {
-            'hasPlaced': False,
-            'hasInfused': False,
-            'hasMoved': False,
-            'turnNumber': new_state['turn']['turnNumber'] + 1
-        }
+        # new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
+        # new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
+        # new_state['turn'] = {
+        #     'hasPlaced': False,
+        #     'hasInfused': False,
+        #     'hasMoved': False,
+        #     'turnNumber': new_state['turn']['turnNumber'] + 1
+        # }
+        new_state['turn']['hasMoved'] = True
         return new_state
 
     elif move_type == 'pincer':
@@ -377,14 +379,15 @@ def apply_move(state: Dict[str, Any], move: Dict[str, Any]) -> Dict[str, Any]:
             v['energy'] = 0
 
         # End turn
-        new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
-        new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
-        new_state['turn'] = {
-            'hasPlaced': False,
-            'hasInfused': False,
-            'hasMoved': False,
-            'turnNumber': new_state['turn']['turnNumber'] + 1
-        }
+        # new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'
+        # new_state['players'][new_state['currentPlayerId']]['reinforcements'] += 1
+        # new_state['turn'] = {
+        #     'hasPlaced': False,
+        #     'hasInfused': False,
+        #     'hasMoved': False,
+        #     'turnNumber': new_state['turn']['turnNumber'] + 1
+        # }
+        new_state['turn']['hasMoved'] = True
 
     elif move_type == 'endTurn':
         new_state['currentPlayerId'] = 'Player2' if current_player == 'Player1' else 'Player1'

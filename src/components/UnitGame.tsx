@@ -275,9 +275,7 @@ const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false, onM
       'Spreader',
       'Dynamic',
       'Alpha-Beta (2)',
-      'Alpha-Beta (3)',
-      'MCTS (20)',
-      'MCTS (50)'
+      'Alpha-Beta (3)'
     ];
     return labels[level] || 'Unknown';
   };
@@ -292,9 +290,7 @@ const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false, onM
       'Territory focused. Spreads across the board and sets up pincers.',
       'Adaptive strategy. Switches tactics based on game phase.',
       'Looks 2 moves ahead. Strong tactical play.',
-      'Looks 3 moves ahead. Very strong but slower.',
-      'Monte Carlo search. Explores many possibilities.',
-      'Advanced Monte Carlo. Strongest AI but slowest.'
+      'Looks 3 moves ahead. Very strong but slower.'
     ];
     return descriptions[level] || '';
   };
@@ -307,12 +303,12 @@ const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false, onM
           <p className="subtitle">Strategy Across Dimensions</p>
 
           <div className="difficulty-selector">
-            <h3>Select AI Level (1-10)</h3>
+            <h3>Select AI Level (1-8)</h3>
             <div className="difficulty-slider-container">
               <input
                 type="range"
                 min="1"
-                max="10"
+                max="8"
                 value={difficulty}
                 onChange={(e) => setDifficulty(parseInt(e.target.value))}
                 className="difficulty-slider"
