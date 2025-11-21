@@ -27,7 +27,7 @@ const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false, onM
     isMobile() ? 'medium' : 'high'
   );
   const [gameStarted, setGameStarted] = useState(false);
-  const [difficulty, setDifficulty] = useState<'very_easy' | 'easy' | 'medium' | 'hard' | 'very_hard'>('medium');
+  const [difficulty, setDifficulty] = useState<number>(5);
 
   // Initialize visual effects when scene is ready
   useEffect(() => {
@@ -265,6 +265,40 @@ const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false, onM
     }
   }, [matchInfo]);
 
+  const getDifficultyLabel = (level: number): string => {
+    const labels = [
+      '', // 0 (unused)
+      'Random',
+      'Greedy',
+      'Aggressor',
+      'Banker',
+      'Spreader',
+      'Dynamic',
+      'Alpha-Beta (2)',
+      'Alpha-Beta (3)',
+      'MCTS (20)',
+      'MCTS (50)'
+    ];
+    return labels[level] || 'Unknown';
+  };
+
+  const getDifficultyDescription = (level: number): string => {
+    const descriptions = [
+      '', // 0 (unused)
+      'Perfect for beginners. Opponent makes random moves.',
+      'Basic strategy. Evaluates material advantage.',
+      'Offensive focused. Prioritizes attacking enemy corners.',
+      'Defensive focused. Protects home corners and builds material.',
+      'Territory focused. Spreads across the board and sets up pincers.',
+      'Adaptive strategy. Switches tactics based on game phase.',
+      'Looks 2 moves ahead. Strong tactical play.',
+      'Looks 3 moves ahead. Very strong but slower.',
+      'Monte Carlo search. Explores many possibilities.',
+      'Advanced Monte Carlo. Strongest AI but slowest.'
+    ];
+    return descriptions[level] || '';
+  };
+
   if (!gameStarted) {
     return (
       <div className="start-screen">
@@ -273,38 +307,23 @@ const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false, onM
           <p className="subtitle">Strategy Across Dimensions</p>
 
           <div className="difficulty-selector">
-            <h3>Select Difficulty</h3>
-            <div className="difficulty-options">
-              <button
-                className={`diff-btn ${difficulty === 'very_easy' ? 'active' : ''}`}
-                onClick={() => setDifficulty('very_easy')}
-              >
-                Very Easy
-              </button>
-              <button
-                className={`diff-btn ${difficulty === 'easy' ? 'active' : ''}`}
-                onClick={() => setDifficulty('easy')}
-              >
-                Easy
-              </button>
-              <button
-                className={`diff-btn ${difficulty === 'medium' ? 'active' : ''}`}
-                onClick={() => setDifficulty('medium')}
-              >
-                Medium
-              </button>
-              <button
-                className={`diff-btn ${difficulty === 'hard' ? 'active' : ''}`}
-                onClick={() => setDifficulty('hard')}
-              >
-                Hard
-              </button>
+            <h3>Select AI Level (1-10)</h3>
+            <div className="difficulty-slider-container">
+              <input
+                type="range"
+                min="1"
+                max="10"
+                value={difficulty}
+                onChange={(e) => setDifficulty(parseInt(e.target.value))}
+                className="difficulty-slider"
+              />
+              <div className="difficulty-level-display">
+                <span className="level-number">Level {difficulty}</span>
+                <span className="level-name">{getDifficultyLabel(difficulty)}</span>
+              </div>
             </div>
             <div className="difficulty-desc">
-              {difficulty === 'very_easy' && "Perfect for beginners. Opponent makes random moves."}
-              {difficulty === 'easy' && "A gentle challenge. Opponent focuses on spreading out."}
-              {difficulty === 'medium' && "Balanced gameplay. Opponent plays defensively."}
-              {difficulty === 'hard' && "A true test of skill. Opponent plays aggressively."}
+              {getDifficultyDescription(difficulty)}
             </div>
           </div>
 
@@ -357,6 +376,9 @@ const UnitGame: React.FC<UnitGameProps> = ({ onGameStart, isPremium = false, onM
         visualQuality={visualQuality}
         onQualityChange={handleQualityChange}
         onBack={() => {
+          // Clear the current game and return to start screen
+          localStorage.removeItem('currentGame');
+          setGameStarted(false);
           handleAction({ type: 'select', vertexId: null });
           setActivePhase(null);
         }}

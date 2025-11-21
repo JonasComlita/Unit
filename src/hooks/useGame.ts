@@ -535,7 +535,7 @@ export const useGame = (matchInfo?: MatchInfo | null) => {
     }, [matchInfo, handleAction]);
 
     // Difficulty state
-    const [difficulty, setDifficulty] = useState<'very_easy' | 'easy' | 'medium' | 'hard' | 'very_hard'>('medium');
+    const [difficulty, setDifficulty] = useState<number>(5);
     const [isAiThinking, setIsAiThinking] = useState(false);
 
     // AI Turn Logic
@@ -551,7 +551,7 @@ export const useGame = (matchInfo?: MatchInfo | null) => {
                     // Import apiClient dynamically to avoid circular dependencies if any
                     const { apiClient } = await import('../services/apiClient');
 
-                    const action = await apiClient.getAIMove(gameState, difficulty as any);
+                    const action = await apiClient.getAIMove(gameState, difficulty);
 
                     console.log('AI returned action:', action);
                     if (action) {

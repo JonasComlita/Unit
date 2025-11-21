@@ -14,13 +14,20 @@ load_dotenv()
 sys.path.append(os.getcwd())
 
 from self_play.random_algorithm import select_move as random_select
+from self_play.greedy_algorithm import select_move as greedy_select
 from self_play.greedy_spreader import select_move as spreader_select
 from self_play.greedy_banker import select_move as banker_select
-from self_play.greedy_algorithm import select_move as greedy_select
 from self_play.greedy_aggressor import select_move as aggressor_select
+from self_play.dynamic_agent import select_move as dynamic_select
+from self_play.alpha_beta_agent import select_move as alpha_beta_select
+from self_play.mcts import MCTSAgent
 from database import init_database, get_or_create_user, update_premium_status, check_premium_status
 from game_recorder import init_game_tables, create_game, record_move, complete_game, export_games_to_training_format
 from multiplayer_server import init_multiplayer
+
+# Initialize MCTS agents (reused across requests)
+mcts_agent_20 = MCTSAgent(simulations=20, rollout_depth=3)
+mcts_agent_50 = MCTSAgent(simulations=50, rollout_depth=6)
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -52,33 +59,70 @@ def get_ai_move():
     try:
         data = request.json
         game_state = data.get('gameState')
-        difficulty = data.get('difficulty', 'medium')
+        difficulty = data.get('difficulty', 5)  # Default to level 5
         
         if not game_state:
             return jsonify({"error": "Missing gameState"}), 400
 
-        logger.info(f"Received move request. Difficulty: {difficulty}")
+        logger.info(f"Received move request. Difficulty Level: {difficulty}")
 
-        # Dispatch to appropriate AI agent
-        if difficulty == 'very_easy':
+        # Convert old string difficulties to numbers for backward compatibility
+        difficulty_map = {
+            'very_easy': 1,
+            'easy': 3,
+            'medium': 5,
+            'hard': 6,
+            'very_hard': 7,
+            'expert': 8
+        }
+        
+        if isinstance(difficulty, str):
+            difficulty = difficulty_map.get(difficulty, 5)
+        
+        # Ensure difficulty is an integer
+        try:
+            difficulty = int(difficulty)
+        except (ValueError, TypeError):
+            difficulty = 5
+        
+        # Clamp to valid range
+        difficulty = max(1, min(10, difficulty))
+
+        # Dispatch to appropriate AI agent based on level
+        if difficulty == 1:
+            # Level 1: Random
             move = random_select(game_state)
-        elif difficulty == 'easy':
-            move = spreader_select(game_state)
-        elif difficulty == 'medium':
-            # Greedy (Basic) is now Medium
+        elif difficulty == 2:
+            # Level 2: Greedy (Basic)
             move = greedy_select(game_state)
-        elif difficulty == 'hard':
-            # Banker is now Hard
+        elif difficulty == 3:
+            # Level 3: Aggressor
+            move = aggressor_select(game_state)
+        elif difficulty == 4:
+            # Level 4: Banker
             move = banker_select(game_state)
-        elif difficulty == 'very_hard':
-            # Placeholder: Aggressor
-            move = aggressor_select(game_state)
-        elif difficulty == 'expert':
-             # Placeholder: Aggressor (until Neural Net is ready)
-            move = aggressor_select(game_state)
-        else:
-            # Default to Medium (Greedy)
-            move = greedy_select(game_state)
+        elif difficulty == 5:
+            # Level 5: Spreader
+            move = spreader_select(game_state)
+        elif difficulty == 6:
+            # Level 6: Dynamic
+            move = dynamic_select(game_state)
+        elif difficulty == 7:
+            # Level 7: Alpha-Beta (Depth 2)
+            move = alpha_beta_select(game_state)
+        elif difficulty == 8:
+            # Level 8: Alpha-Beta (Depth 3) - slower but stronger
+            import self_play.alpha_beta_agent as ab
+            old_depth = ab.MAX_DEPTH
+            ab.MAX_DEPTH = 3
+            move = alpha_beta_select(game_state)
+            ab.MAX_DEPTH = old_depth
+        elif difficulty == 9:
+            # Level 9: MCTS (20 simulations)
+            move = mcts_agent_20.select_move(game_state)
+        else:  # difficulty == 10
+            # Level 10: MCTS (50 simulations) - strongest but slowest
+            move = mcts_agent_50.select_move(game_state)
             
         return jsonify({"action": move})
 

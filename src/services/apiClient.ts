@@ -35,9 +35,9 @@ class APIClient {
 
         } catch (error) {
             console.error('Failed to upload game:', error);
-            return { 
-                success: false, 
-                error: error instanceof Error ? error.message : 'Unknown error' 
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
             };
         }
     }
@@ -45,7 +45,7 @@ class APIClient {
     /**
      * Get AI's best move for current game state
      */
-    async getAIMove(gameState: any, difficulty: 'easy' | 'medium' | 'hard' | 'expert' = 'medium'): Promise<any> {
+    async getAIMove(gameState: any, difficulty: number = 5): Promise<any> {
         try {
             const response = await fetch(`${this.baseURL}${API_CONFIG.endpoints.aiMove}`, {
                 method: 'POST',
@@ -75,7 +75,7 @@ class APIClient {
     async getStats(): Promise<any> {
         try {
             const response = await fetch(`${this.baseURL}${API_CONFIG.endpoints.stats}`);
-            
+
             if (!response.ok) {
                 throw new Error('Failed to fetch stats');
             }
@@ -94,7 +94,7 @@ class APIClient {
     private async fetchWithRetry(url: string, options: RequestInit, attempt: number = 1): Promise<Response> {
         try {
             const response = await fetch(url, options);
-            
+
             // If rate limited or server error, retry
             if ((response.status === 429 || response.status >= 500) && attempt < this.retryAttempts) {
                 await this.sleep(this.retryDelay * attempt);

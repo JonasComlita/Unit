@@ -305,6 +305,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
           <button style={{
             width: '100%',
             padding: '10px',
+            marginBottom: '8px',
             background: '#333',
             border: '1px solid #555',
             borderRadius: '2px',
@@ -321,6 +322,28 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
             }}
           >
             Settings
+          </button>
+          <button style={{
+            width: '100%',
+            padding: '10px',
+            background: '#D0021B',
+            border: '1px solid #ff4444',
+            borderRadius: '2px',
+            color: '#fff',
+            fontSize: '14px',
+            cursor: 'pointer',
+            textAlign: 'left',
+            fontFamily: 'inherit',
+            fontWeight: 'bold',
+          }}
+            onClick={() => {
+              if (window.confirm('Are you sure you want to quit? Your current game will be lost.')) {
+                setShowMenu(false);
+                onBack && onBack();
+              }
+            }}
+          >
+            Quit Game
           </button>
         </div>
       )}

@@ -2,17 +2,28 @@ from typing import Dict, Any, List, Optional
 import math
 from .agent_utils import get_force, LAYER_GRAVITY, FORCE_CAP_MAX
 
+def get_position_coord(vertex: Dict[str, Any], coord: str) -> float:
+    """Safely extract position coordinate from vertex (handles both dict and object formats)."""
+    pos = vertex.get('position', {})
+    # Try direct access first (dict format)
+    if isinstance(pos, dict):
+        return pos.get(coord, 0.0)
+    # Try attribute access (object format from TypeScript)
+    return getattr(pos, coord, 0.0)
+
 def get_distance(v1: Dict[str, Any], v2: Dict[str, Any]) -> float:
     """Calculate Euclidean distance between two vertices."""
-    dx = v1['x'] - v2['x']
-    dz = v1['z'] - v2['z']
+    dx = get_position_coord(v1, 'x') - get_position_coord(v2, 'x')
+    dz = get_position_coord(v1, 'z') - get_position_coord(v2, 'z')
     # Simple layer difference approximation (assuming layer spacing is consistent enough for relative distance)
-    dy = (v1['layer'] - v2['layer']) * 2.0 # Arbitrary vertical scaling
+    dy = (v1.get('layer', 0) - v2.get('layer', 0)) * 2.0 # Arbitrary vertical scaling
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 
 def get_manhattan_distance(v1: Dict[str, Any], v2: Dict[str, Any]) -> int:
     """Calculate Manhattan-like distance (grid steps) - simplified."""
-    return abs(v1['x'] - v2['x']) + abs(v1['z'] - v2['z']) + abs(v1['layer'] - v2['layer'])
+    return abs(get_position_coord(v1, 'x') - get_position_coord(v2, 'x')) + \
+           abs(get_position_coord(v1, 'z') - get_position_coord(v2, 'z')) + \
+           abs(v1.get('layer', 0) - v2.get('layer', 0))
 
 def h_material(state: Dict[str, Any], perspective: str) -> float:
     """
