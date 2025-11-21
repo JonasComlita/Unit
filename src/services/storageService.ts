@@ -15,6 +15,7 @@ class StorageService {
      * Save game locally for later upload
      */
     savePendingGame(gameLog: GameLog): void {
+        if (!gameLog) return;
         try {
             const pending = this.getPendingGames();
             pending.push(gameLog);
@@ -31,7 +32,7 @@ class StorageService {
     getPendingGames(): GameLog[] {
         try {
             const stored = localStorage.getItem(STORAGE_KEYS.PENDING_GAMES);
-            return stored ? JSON.parse(stored) : [];
+            return stored ? JSON.parse(stored).filter((g: GameLog | null) => !!g) : [];
         } catch (error) {
             console.error('Failed to get pending games:', error);
             return [];
@@ -43,7 +44,7 @@ class StorageService {
      */
     async syncPendingGames(): Promise<{ uploaded: number; failed: number }> {
         const pending = this.getPendingGames();
-        
+
         if (pending.length === 0) {
             return { uploaded: 0, failed: 0 };
         }
@@ -55,8 +56,10 @@ class StorageService {
         const stillPending: GameLog[] = [];
 
         for (const game of pending) {
+            if (!game) continue;
+
             const result = await apiClient.uploadGame(game);
-            
+
             if (result.success) {
                 uploaded++;
                 console.log(`✓ Uploaded game ${game.gameId}`);
@@ -129,10 +132,10 @@ class StorageService {
     updateUserStats(winner: string | null, moves: number): void {
         try {
             const stats = this.getUserStats();
-            
+
             stats.gamesPlayed++;
             stats.totalMoves += moves;
-            
+
             if (winner === 'Player1') {
                 stats.wins++;
             } else if (winner === 'Player2') {

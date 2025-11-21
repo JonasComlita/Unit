@@ -123,10 +123,12 @@ def get_legal_moves(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     turn = state['turn']
     vertices = state['vertices']
 
-    # Placement
     if not turn['hasPlaced'] and state['players'][current_player]['reinforcements'] > 0:
         for corner_id in state['homeCorners'][current_player]:
-            moves.append({'type': 'place', 'vertexId': corner_id})
+            vertex = vertices[corner_id]
+            # Can place if empty OR if occupied by self
+            if not vertex['stack'] or vertex['stack'][0]['player'] == current_player:
+                moves.append({'type': 'place', 'vertexId': corner_id})
 
     # Infusion
     if not turn['hasInfused']:

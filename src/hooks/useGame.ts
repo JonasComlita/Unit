@@ -182,7 +182,12 @@ export const useGame = (matchInfo?: MatchInfo | null) => {
                         // Check if vertex is a home corner for current player
                         const isHomeCorner = prev.homeCorners[prev.currentPlayerId].includes(action.vertexId);
 
-                        if (isHomeCorner) {
+                        // Check if vertex is occupied by opponent
+                        const targetVertex = nextState.vertices[action.vertexId];
+                        const isOccupiedByOpponent = targetVertex.stack.length > 0 &&
+                            targetVertex.stack[0].player !== prev.currentPlayerId;
+
+                        if (isHomeCorner && !isOccupiedByOpponent) {
                             const newPiece: Piece = {
                                 id: `p-${Date.now()}`, player: prev.currentPlayerId
                             };
@@ -190,7 +195,7 @@ export const useGame = (matchInfo?: MatchInfo | null) => {
                             nextState.players[prev.currentPlayerId].reinforcements -= 1;
                             nextState.turn.hasPlaced = true;
                         } else {
-                            console.log('Place validation failed: not a home corner');
+                            console.log('Place validation failed:', { isHomeCorner, isOccupiedByOpponent });
                         }
                     }
                     break;

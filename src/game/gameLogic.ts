@@ -179,7 +179,11 @@ export const calculateValidActions = (state: GameState): Partial<GameState> => {
 
     // Placement
     if (!turn.hasPlaced && players[currentPlayerId].reinforcements > 0) {
-        updates.validPlacementVertices = homeCorners[currentPlayerId];
+        updates.validPlacementVertices = homeCorners[currentPlayerId].filter(id => {
+            const v = vertices[id];
+            // Can place if empty OR if occupied by self
+            return v.stack.length === 0 || v.stack[0].player === currentPlayerId;
+        });
     }
 
     // Infusion
@@ -261,12 +265,17 @@ export const calculateValidActions = (state: GameState): Partial<GameState> => {
     // Pincer targets
     const pincerMap: Record<string, string[]> = {};
     Object.values(vertices).forEach(targetV => {
-        const friendlyOrigins = targetV.adjacencies
-            .map(id => vertices[id])
-            .filter(orig => orig && orig.stack.length > 0 && orig.stack[0].player === currentPlayerId)
-            .map(orig => orig.id);
-        if (friendlyOrigins.length >= 2) {
-            pincerMap[targetV.id] = friendlyOrigins.slice(0, GAME_RULES.maxPincerParticipants);
+        // Only allow pincer if target is occupied by opponent
+        const isEnemy = targetV.stack.length > 0 && targetV.stack[0].player !== currentPlayerId;
+
+        if (isEnemy) {
+            const friendlyOrigins = targetV.adjacencies
+                .map(id => vertices[id])
+                .filter(orig => orig && orig.stack.length > 0 && orig.stack[0].player === currentPlayerId)
+                .map(orig => orig.id);
+            if (friendlyOrigins.length >= 2) {
+                pincerMap[targetV.id] = friendlyOrigins.slice(0, GAME_RULES.maxPincerParticipants);
+            }
         }
     });
     updates.validPincerTargets = pincerMap;

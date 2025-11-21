@@ -28,13 +28,13 @@ class GameDataLogger {
 
     constructor() {
         this.isOnline = navigator.onLine;
-        
+
         window.addEventListener('online', () => {
             console.log('📶 Connection restored');
             this.isOnline = true;
             this.syncPendingGames();
         });
-        
+
         window.addEventListener('offline', () => {
             console.log('📵 Connection lost');
             this.isOnline = false;
@@ -45,7 +45,7 @@ class GameDataLogger {
 
     startGame(platform: 'web' | 'ios' | 'android' = 'web'): void {
         const gameId = this.generateGameId();
-        
+
         this.currentGame = {
             gameId,
             startTime: Date.now(),
@@ -66,7 +66,7 @@ class GameDataLogger {
         }
 
         const thinkingTime = Date.now() - this.moveStartTime;
-        
+
         const moveLog: MoveLog = {
             moveNumber: this.currentGame.moves.length + 1,
             playerId: currentPlayer,
@@ -81,37 +81,46 @@ class GameDataLogger {
     }
 
     async endGame(winner: string | null): Promise<void> {
-        if (!this.currentGame) {
+        const game = this.currentGame;
+        if (!game) {
             console.warn('No game in progress to end');
             return;
         }
 
-        this.currentGame.endTime = Date.now();
-        this.currentGame.winner = winner;
+        // Prevent double ending
+        if (game.endTime) {
+            return;
+        }
 
-        const duration = this.currentGame.endTime - this.currentGame.startTime;
-        console.log(`🏁 Game ${this.currentGame.gameId} ended`);
+        game.endTime = Date.now();
+        game.winner = winner;
+
+        const duration = game.endTime - game.startTime;
+        console.log(`🏁 Game ${game.gameId} ended`);
         console.log(`   Winner: ${winner || 'Draw'}`);
-        console.log(`   Moves: ${this.currentGame.totalMoves}`);
+        console.log(`   Moves: ${game.totalMoves}`);
         console.log(`   Duration: ${Math.round(duration / 1000)}s`);
 
-        storageService.updateUserStats(winner, this.currentGame.totalMoves);
+        storageService.updateUserStats(winner, game.totalMoves);
 
         if (this.isOnline) {
-            const result = await apiClient.uploadGame(this.currentGame);
-            
+            const result = await apiClient.uploadGame(game);
+
             if (result.success) {
                 console.log('✓ Game uploaded successfully');
             } else {
                 console.log('✗ Upload failed, saving locally');
-                storageService.savePendingGame(this.currentGame);
+                storageService.savePendingGame(game);
             }
         } else {
             console.log('📵 Offline, saving locally');
-            storageService.savePendingGame(this.currentGame);
+            storageService.savePendingGame(game);
         }
 
-        this.currentGame = null;
+        // Only clear if it's still the same game
+        if (this.currentGame === game) {
+            this.currentGame = null;
+        }
     }
 
     async syncPendingGames(): Promise<void> {
@@ -121,7 +130,7 @@ class GameDataLogger {
         }
 
         const result = await storageService.syncPendingGames();
-        
+
         if (result.uploaded > 0 || result.failed > 0) {
             console.log(`Sync result: ${result.uploaded} uploaded, ${result.failed} failed`);
         }

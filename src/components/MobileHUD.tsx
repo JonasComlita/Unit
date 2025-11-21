@@ -838,7 +838,7 @@ const MobileHUD: React.FC<MobileHUDProps> = ({ gameState, onEndTurn, activePhase
                   Enemy Unit
                 </div>
                 <div style={{ color: '#888', fontSize: '14px', marginBottom: '12px' }}>
-                  STACK: {selectedVertex.stack.length} | ENERGY: {selectedVertex.energy} | LAYER {selectedVertex.layer}
+                  STACK: {selectedVertex.stack.length} | ENERGY: {selectedVertex.energy} | GRAVITY: {BOARD_CONFIG.layerGravity[selectedVertex.layer]} | FORCE: {getForce(selectedVertex as any)}
                 </div>
                 <div style={{
                   color: '#666',

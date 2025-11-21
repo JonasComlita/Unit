@@ -22,6 +22,10 @@ The ultimate goal is to eliminate all of the opponent's pieces from the board. A
 	- 5x5: minPieces=1, minEnergy=1, minForce=4
 	- 7x7: minPieces=1, minEnergy=1, minForce=9
 
+### Occupation Rules
+- Players must move friendly home corner vertices that are at the force cap of 10 to an empty vertex.
+- Players can not place a piece on a home corner that is occupied by the opponent.
+
 ### Force
 - The strength of an occupied stack, used for combat.
 - **Calculation:**
